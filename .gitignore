@@ -1,0 +1,20 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+*.DS_Store
+# Virtual environments
+.venv
+
+# Superpowers brainstorm sessions
+.superpowers/
+
+# Generated HTML visualizations and review sessions
+*-cues.html
+*-review.html
+*-session.json
+
+.pytest_cache/

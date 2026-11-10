@@ -1,0 +1,418 @@
+"""Cue placement strategy engine — maps PSSI phrases to cue points."""
+
+from __future__ import annotations
+
+from djcues.constants import CUE_SYSTEM, CUE_SYSTEM_BY_PAD, get_genre_profile
+from djcues.models import BeatGrid, CuePoint, CueProposal, Phrase, Track
+
+
+def _spectral_similarity(wf_points: list, i0: int, i_mid: int, i1: int) -> float:
+    """Compare the RGB (bass/mid/treble) profile of two halves of a waveform section.
+
+    Returns a similarity score from 0.0 (completely different) to 1.0 (identical).
+    Uses mean-squared-error of the per-point RGB values, normalized.
+    """
+    half_len = min(i_mid - i0, i1 - i_mid)
+    if half_len < 2:
+        return 0.0
+
+    first_half = wf_points[i0 : i0 + half_len]
+    second_half = wf_points[i_mid : i_mid + half_len]
+
+    total_mse = 0.0
+    for a, b in zip(first_half, second_half):
+        # RGB values are 0-7, normalize to 0-1
+        dr = (a.red - b.red) / 7
+        dg = (a.green - b.green) / 7
+        db = (a.blue - b.blue) / 7
+        dh = a.height - b.height  # already 0-1
+        total_mse += dr * dr + dg * dg + db * db + dh * dh
+
+    # Max possible MSE per point = 4 (all channels off by 1.0)
+    mse = total_mse / half_len / 4
+    return max(0.0, 1.0 - mse)
+
+
+def _find_stable_loop(
+    track: Track,
+    search_start_ms: float,
+    search_end_ms: float,
+    bar_sizes: tuple[int, ...] = (8, 4, 2, 1),
+    min_energy: float = 0.05,
+    min_similarity: float = 0.7,
+) -> tuple[float, int, float] | None:
+    """Find a stable, loopable region using waveform energy and spectral similarity.
+
+    Scans bar-aligned windows from search_start_ms forward. Tries 8 bars first,
+    then falls back to 4, 2, 1. A good loop has non-trivial energy AND the
+    second half spectrally matches the first half (so the loop repeats cleanly).
+
+    Returns (position_ms, loop_bars, similarity_score) or None if nothing found.
+    """
+    if not track.waveform:
+        return None
+
+    bg = track.beat_grid
+    n = len(track.waveform)
+    total_ms = track.duration_ms
+    if total_ms <= 0 or n == 0:
+        return None
+
+    for loop_bars in bar_sizes:
+        loop_ms = bg.bars_to_ms(loop_bars)
+        best_pos = None
+        best_score = 0.0
+
+        # Snap search start to bar boundary
+        start_beat = bg.ms_to_beat(search_start_ms)
+        bar_start = ((start_beat - 1) // 4) * 4 + 1
+        pos_ms = bg.beat_to_ms(bar_start)
+
+        while pos_ms + loop_ms <= search_end_ms and pos_ms + loop_ms <= total_ms:
+            # Map to waveform indices
+            i0 = int(n * pos_ms / total_ms)
+            i1 = int(n * (pos_ms + loop_ms) / total_ms)
+            i_mid = (i0 + i1) // 2
+            if i1 - i0 < 4:
+                pos_ms += bg.bars_to_ms(1)
+                continue
+
+            # Check energy
+            heights = [p.height for p in track.waveform[i0:i1]]
+            mean_e = sum(heights) / len(heights)
+            if mean_e < min_energy:
+                pos_ms += bg.bars_to_ms(1)
+                continue
+
+            # Check spectral similarity between halves
+            similarity = _spectral_similarity(track.waveform, i0, i_mid, i1)
+            if similarity > best_score:
+                best_score = similarity
+                best_pos = pos_ms
+
+            pos_ms += bg.bars_to_ms(1)
+
+        if best_pos is not None and best_score >= min_similarity:
+            return (best_pos, loop_bars, best_score)
+
+            pos_ms += bg.bars_to_ms(1)  # slide by 1 bar
+
+    return None
+
+
+class CueStrategy:
+    """Proposes cue placements based on phrase analysis, genre profiles, and cue system.
+
+    Supports genre personalization for Industrial Techno, Hard Techno/Schranz,
+    Hypnotic Groove, Hard Groove, Bounce, Trance, and general dance music.
+    """
+
+    def __init__(
+        self,
+        memory_offset_bars: int | None = None,
+        loop_length_bars: int | None = None,
+        genre: str = "auto",
+        tempo_adaptive: bool = True,
+    ) -> None:
+        self.genre = genre
+        self._user_memory_offset = memory_offset_bars
+        self._user_loop_bars = loop_length_bars
+        self.tempo_adaptive = tempo_adaptive
+
+    @property
+    def memory_offset_bars(self) -> int:
+        return self._user_memory_offset if self._user_memory_offset is not None else 16
+
+    @property
+    def loop_length_bars(self) -> int:
+        return self._user_loop_bars if self._user_loop_bars is not None else 4
+
+    def _resolve_profile(self, track: Track) -> dict:
+        """Resolve active genre profile — either explicitly chosen or auto-detected by BPM."""
+        if self.genre and self.genre.lower() != "auto":
+            return get_genre_profile(self.genre)
+        # Automatic detection based on track BPM
+        if track.bpm >= 152.0:
+            return get_genre_profile("industrial")
+        elif track.bpm >= 142.0:
+            return get_genre_profile("hard_groove")
+        elif track.bpm >= 135.0:
+            return get_genre_profile("hypnotic_groove")
+        return get_genre_profile("general")
+
+    def propose(self, track: Track) -> CueProposal:
+        """Generate a cue proposal for a track based on phrase, beat structure, and genre."""
+        bg = track.beat_grid
+        phrases = track.phrases
+        hot_cues: list[CuePoint] = []
+        memory_cues: list[CuePoint] = []
+        confidence: dict[str, float] = {}
+        notes: list[str] = []
+
+        profile = self._resolve_profile(track)
+        labels = profile["labels"]
+
+        # Loop length resolution: explicit user override > profile default
+        if self._user_loop_bars is not None:
+            effective_loop_bars = self._user_loop_bars
+        else:
+            effective_loop_bars = profile.get("default_loop_bars", 8 if track.bpm >= 140 else 4)
+
+        # Memory offset resolution: explicit user override > profile default
+        if self._user_memory_offset is not None:
+            effective_offset_bars = self._user_memory_offset
+        else:
+            effective_offset_bars = profile.get("default_memory_offset_bars", 16)
+
+        pre_drop_d = profile.get("pre_drop_d_beats", 8)
+        pre_drop_f = profile.get("pre_drop_f_beats", 32)
+
+        notes.append(
+            f"Genre-Profil: {profile['name']} ({profile['bpm_range']}) "
+            f"— Loops: {effective_loop_bars} Takte, Memory-Offset: {effective_offset_bars} Takte"
+        )
+
+        positions: dict[str, float] = {}
+
+        # --- A: First Beat ---
+        positions["A"] = bg.beat_to_ms(1)
+        confidence["A"] = 1.0
+        notes.append(f"A ({labels['A']}): beat 1")
+
+        # --- B: Bassline / Rumble / Groove Entry ---
+        intro_end = max(
+            (p.position_ms + p.duration_ms for p in phrases if p.label == "Intro"),
+            default=positions["A"],
+        )
+        bass_candidates = [p for p in phrases if p.position_ms >= intro_end and p.label == "Up"]
+        if not bass_candidates:
+            bass_candidates = [
+                p for p in phrases
+                if p.position_ms > positions["A"] and p.label not in ("Intro", "Unknown")
+            ]
+        if bass_candidates:
+            bass_phrase = bass_candidates[0]
+            positions["B"] = bass_phrase.position_ms
+            confidence["B"] = 0.70
+            notes.append(f"B ({labels['B']}): {bass_phrase.label} at beat {bass_phrase.beat_start}")
+        elif phrases:
+            positions["B"] = positions["A"]
+            confidence["B"] = 0.25
+            notes.append(f"B ({labels['B']}): no post-intro phrase found — using beat 1")
+        else:
+            # Fallback for tracks without PSSI analysis
+            default_b_beat = 65 if track.duration_ms >= 120_000 else 33
+            positions["B"] = min(bg.beat_to_ms(default_b_beat), track.duration_ms * 0.2)
+            confidence["B"] = 0.50
+            notes.append(f"B ({labels['B']}): grid-based fallback at beat {default_b_beat} (no PSSI phrases)")
+
+        # --- G: Main Drop / Climax Detection ---
+        choruses = [p for p in phrases if p.label == "Chorus"]
+        min_drop_ms = track.duration_ms * 0.20
+        late_choruses = [p for p in choruses if p.position_ms >= min_drop_ms]
+
+        main_drop: Phrase | None = None
+
+        if late_choruses:
+            main_drop = late_choruses[0]
+            positions["G"] = main_drop.position_ms
+            confidence["G"] = 0.85
+            notes.append(f"G ({labels['G']}): first Chorus after 20% at beat {main_drop.beat_start}")
+        elif choruses:
+            main_drop = choruses[-1]
+            positions["G"] = main_drop.position_ms
+            confidence["G"] = 0.60
+            notes.append(f"G ({labels['G']}): fallback to last Chorus at beat {main_drop.beat_start}")
+        elif phrases:
+            # Techno / Groove / Underground fallback: Mood 2 (Verse/Bridge) without "Chorus" tag
+            breakdowns = [
+                p for p in phrases
+                if p.label in ("Down", "Bridge") and p.position_ms >= min_drop_ms
+            ]
+            post_breakdown_drop: Phrase | None = None
+            if breakdowns:
+                for bd in breakdowns:
+                    candidates = [
+                        p for p in phrases
+                        if p.beat_start >= bd.beat_end and p.label not in ("Down", "Bridge", "Outro", "Intro")
+                    ]
+                    if candidates:
+                        post_breakdown_drop = candidates[0]
+                        break
+
+            if post_breakdown_drop is not None:
+                main_drop = post_breakdown_drop
+                positions["G"] = main_drop.position_ms
+                confidence["G"] = 0.75
+                notes.append(f"G ({labels['G']}): climax after breakdown at beat {main_drop.beat_start} ({main_drop.label})")
+            else:
+                # Search for the longest or most energetic phrase in the 25%-60% zone
+                mid_phrases = [
+                    p for p in phrases
+                    if p.position_ms >= min_drop_ms and p.position_ms <= track.duration_ms * 0.65
+                    and p.label not in ("Intro", "Outro")
+                ]
+                if mid_phrases:
+                    chosen = max(mid_phrases, key=lambda p: (p.duration_ms, p.position_ms))
+                    main_drop = chosen
+                    positions["G"] = chosen.position_ms
+                    confidence["G"] = 0.35
+                    notes.append(f"G ({labels['G']}): phrase-energy fallback at beat {chosen.beat_start} ({chosen.label})")
+                else:
+                    main_drop = None
+                    confidence["G"] = 0.0
+                    notes.append(f"G ({labels['G']}): no suitable phrase found — skipped")
+        else:
+            # Fallback for tracks without PSSI
+            drop_beat = ((bg.ms_to_beat(track.duration_ms * 0.33) - 1) // 16) * 16 + 1
+            positions["G"] = bg.beat_to_ms(max(65, drop_beat))
+            confidence["G"] = 0.35
+            notes.append(f"G ({labels['G']}): grid-based 33% fallback at beat {drop_beat} (no PSSI phrases)")
+
+        # --- C: First Breakdown ---
+        # Must be strictly after Pad B and before Pad G
+        min_c_ms = positions.get("B", positions["A"]) + bg.bars_to_ms(4)
+        if "G" in positions:
+            before_drop = [
+                p for p in phrases
+                if p.position_ms < positions["G"] and p.position_ms >= min_c_ms
+            ]
+        else:
+            before_drop = [p for p in phrases if p.position_ms >= min_c_ms]
+
+        early_breakdowns = [p for p in before_drop if p.label in ("Down", "Bridge")]
+        if early_breakdowns:
+            first_breakdown = early_breakdowns[0]
+            positions["C"] = first_breakdown.position_ms
+            confidence["C"] = 0.80
+            notes.append(f"C ({labels['C']}): {first_breakdown.label} at beat {first_breakdown.beat_start}")
+        else:
+            # Fallback: distinct pre-drop Up/Verse phrase, strictly not duplicating B
+            pre_drop_phrases = [
+                p for p in before_drop
+                if p.label in ("Up", "Verse1", "Verse2", "Verse3", "Verse4", "Verse5", "Verse6")
+                and p.position_ms >= min_c_ms
+            ]
+            if pre_drop_phrases:
+                fallback = pre_drop_phrases[-1]
+                positions["C"] = fallback.position_ms
+                confidence["C"] = 0.50
+                notes.append(f"C ({labels['C']}): no Down/Bridge; fallback to {fallback.label} at beat {fallback.beat_start}")
+            elif not phrases and "G" in positions and positions["G"] > min_c_ms:
+                # Grid fallback for tracks without PSSI
+                mid_beat = ((bg.ms_to_beat((positions["B"] + positions["G"]) / 2) - 1) // 8) * 8 + 1
+                positions["C"] = bg.beat_to_ms(mid_beat)
+                confidence["C"] = 0.40
+                notes.append(f"C ({labels['C']}): grid midpoint fallback at beat {mid_beat}")
+            else:
+                confidence["C"] = 0.0
+                notes.append(f"C ({labels['C']}): no suitable pre-drop phrase found")
+
+        # --- D and F: Pre-Drop Waypoints ---
+        if "G" in positions:
+            positions["D"] = max(bg.beat_to_ms(1), positions["G"] - bg.ms_per_beat * pre_drop_d)
+            positions["F"] = max(bg.beat_to_ms(1), positions["G"] - bg.ms_per_beat * pre_drop_f)
+            d_conf = confidence["G"] if confidence["G"] < 0.5 else min(0.95, confidence["G"] + 0.1)
+            confidence["D"] = d_conf
+            confidence["F"] = d_conf
+            notes.append(f"D ({labels['D']}): {pre_drop_d} beats before G")
+            notes.append(f"F ({labels['F']}): {pre_drop_f} beats before G")
+
+            # --- E: Main Breakdown ---
+            after_drop = [
+                p for p in phrases
+                if p.position_ms > positions["G"] and p.label in ("Down", "Bridge")
+            ]
+            if after_drop:
+                main_breakdown = max(after_drop, key=lambda p: (p.duration_ms, -p.position_ms))
+                positions["E"] = main_breakdown.position_ms
+                confidence["E"] = 0.85
+                notes.append(f"E ({labels['E']}): {main_breakdown.label} at beat {main_breakdown.beat_start}")
+            elif not phrases:
+                # Grid fallback
+                e_beat = ((bg.ms_to_beat(track.duration_ms * 0.65) - 1) // 16) * 16 + 1
+                positions["E"] = bg.beat_to_ms(e_beat)
+                confidence["E"] = 0.40
+                notes.append(f"E ({labels['E']}): grid-based 65% fallback at beat {e_beat}")
+            else:
+                confidence["E"] = 0.0
+                notes.append(f"E ({labels['E']}): no Down/Bridge found after Main Drop")
+        else:
+            confidence["D"] = confidence["F"] = 0.0
+            notes.append("D/F: no Main Drop available for beat-offset markers")
+
+        # --- H: Final Drop / Outro ---
+        if choruses:
+            final_drop = choruses[-1]
+            positions["H"] = final_drop.position_ms
+            confidence["H"] = 0.85
+            notes.append(f"H ({labels['H']}): final Chorus at beat {final_drop.beat_start}")
+        elif phrases:
+            positions["H"] = next((p.position_ms for p in phrases if p.label == "Outro"), phrases[-1].position_ms)
+            confidence["H"] = 0.65
+            notes.append(f"H ({labels['H']}): using Outro/last phrase")
+        else:
+            # Fallback: 32 bars before end of track
+            outro_beat = max(1, bg.ms_to_beat(track.duration_ms) - 128)
+            outro_beat = ((outro_beat - 1) // 16) * 16 + 1
+            positions["H"] = bg.beat_to_ms(outro_beat)
+            confidence["H"] = 0.45
+            notes.append(f"H ({labels['H']}): grid-based 32-bar mix-out at beat {outro_beat}")
+
+        # --- Build CuePoint objects ---
+        for slot in CUE_SYSTEM:
+            pad = slot.pad
+            if pad not in positions:
+                continue
+
+            pos_ms = positions[pad]
+            loop_end = None
+            if slot.is_loop:
+                loop_end = pos_ms + bg.bars_to_ms(effective_loop_bars)
+
+            hot_label = labels.get(pad, slot.hot_cue_label)
+            mem_label = labels.get(pad, slot.memory_cue_label)
+
+            hot_cues.append(CuePoint(
+                kind=slot.kind,
+                position_ms=pos_ms,
+                loop_end_ms=loop_end,
+                color_table_index=slot.hot_cue_color_table_index,
+                color=slot.hot_cue_color,
+                comment=hot_label,
+            ))
+
+            # Memory cue
+            if slot.memory_offset_bars == 0:
+                mem_pos = pos_ms
+            else:
+                mem_pos = pos_ms - bg.bars_to_ms(effective_offset_bars)
+                first_beat_ms = bg.beat_to_ms(1)
+                if mem_pos < first_beat_ms:
+                    mem_pos = first_beat_ms
+                else:
+                    # Snap to nearest downbeat (bar start)
+                    mem_beat = bg.ms_to_beat(mem_pos)
+                    bar_beat = ((mem_beat - 1) // 4) * 4 + 1
+                    mem_pos = bg.beat_to_ms(bar_beat)
+
+            mem_loop_end = None
+            if slot.is_loop:
+                mem_loop_end = mem_pos + bg.bars_to_ms(effective_loop_bars)
+
+            memory_cues.append(CuePoint(
+                kind=0,
+                position_ms=mem_pos,
+                loop_end_ms=mem_loop_end,
+                color_table_index=slot.memory_cue_color_table_index,
+                color=slot.memory_cue_color,
+                comment=mem_label,
+            ))
+
+        return CueProposal(
+            track=track,
+            hot_cues=hot_cues,
+            memory_cues=memory_cues,
+            confidence=confidence,
+            notes=notes,
+        )
