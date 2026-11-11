@@ -377,63 +377,89 @@ def _menu_existing_cues_policy() -> str:
     return ["skip", "overwrite", "ask"][idx]
 
 
+def _print_walkthrough_header(subtitle: str | None = None, details: list[str] | None = None) -> None:
+    """Clear the screen and render a clean walkthrough status header."""
+    click.clear()
+    click.echo("=" * 68)
+    title = "djcues — Rekordbox Genre & Cue Walkthrough"
+    if subtitle:
+        title = f"{title} | {subtitle}"
+    click.echo(f"  {title}")
+    if details:
+        click.echo("-" * 68)
+        for line in details:
+            click.echo(f"  {line}")
+    click.echo("=" * 68)
+
+
 def _run_walkthrough_flow() -> None:
-    """Run the interactive walkthrough with a persistent action loop."""
+    """Run the interactive walkthrough with a persistent, clean action loop."""
     import pathlib
 
-    click.clear()
-    click.echo("=" * 65)
-    click.echo("       djcues — Rekordbox Genre & Cue Walkthrough")
-    click.echo("=" * 65)
+    _print_walkthrough_header("Setup")
 
     # 0. Rekordbox Version (v6 / v7 / custom)
     _select_rekordbox_version()
+    active_db = get_active_db_info()
+    rb_line = f"Rekordbox {active_db.version_major} ({active_db.version_str})" if active_db else None
 
     # 1. Genre
+    _print_walkthrough_header("Genre", [rb_line] if rb_line else None)
     genre_key, profile = _menu_genre()
-    click.echo(f"\n[Aktiviert] Genre: {profile['name']} ({profile['bpm_range']})")
 
     # 2. Hot Cue Count, Loops, Auto-End-Loop & Overwrite Policy
+    _print_walkthrough_header(
+        "Cues & Loops",
+        [f"Genre: {profile['name']} ({profile['bpm_range']})"],
+    )
     max_hot_cues, use_loops, auto_end_loop, offset, loop_bars = _menu_cue_options(profile, ask_tuning=False)
-    existing_policy = _menu_existing_cues_policy()
+
     loop_txt = f"{loop_bars} Takte" if use_loops else "Aus"
     auto_txt = f"Aktiv ({loop_bars} Takte)" if auto_end_loop else "Aus"
-    click.echo(
-        f"  • Hot Cues: {max_hot_cues} | Loops: {loop_txt} | Auto-End-Loop: {auto_txt} "
-        f"| Offset: {offset} Takte | Vorhandene Cues: {_EXISTING_POLICY_LABELS[existing_policy]}"
+    _print_walkthrough_header(
+        "Vorhandene Cues",
+        [
+            f"Genre: {profile['name']} | Hot Cues: {max_hot_cues} | Loops: {loop_txt} | Auto-End-Loop: {auto_txt}",
+        ],
     )
+    existing_policy = _menu_existing_cues_policy()
 
     # 3. Playlist & Tracks
-    click.echo("\n--- SCHRITT 3: PLAYLIST & TRACKS AUSWÄHLEN ---")
+    _print_walkthrough_header(
+        "Playlist & Tracks",
+        [
+            f"Genre: {profile['name']} | Hot Cues: {max_hot_cues} | Loops: {loop_txt} | Auto-End-Loop: {auto_txt}",
+            f"Vorhandene Cues: {_EXISTING_POLICY_LABELS[existing_policy]}",
+        ],
+    )
     playlist, track_name, all_tracks = _menu_scope()
 
-    # 4. Persistent Action Loop (stay here so user can run multiple actions in a row)
+    # 4. Persistent Action Loop (clears screen each turn so nothing piles up above)
     while True:
         loop_txt = f"{loop_bars} Takte" if use_loops else "Aus"
         auto_txt = f"Aktiv ({loop_bars} Takte)" if auto_end_loop else "Aus"
         scope_txt = "Alle Tracks" if all_tracks else (track_name or "Auswahl")
-        click.echo("\n" + "=" * 65)
-        click.echo(f"  Aktiv: {profile['name']} | Playlist: {playlist} ({scope_txt})")
-        click.echo(
-            f"  Cues: {max_hot_cues} | Loops: {loop_txt} | Auto-End-Loop: {auto_txt} "
-            f"| Vorhandene: {_EXISTING_POLICY_LABELS[existing_policy]}"
-        )
-        click.echo("=" * 65)
+        status_lines = [
+            f"Aktiv: {profile['name']} | Playlist: {playlist} ({scope_txt})",
+            f"Cues: {max_hot_cues} | Loops: {loop_txt} | Auto-End-Loop: {auto_txt} | Vorhandene: {_EXISTING_POLICY_LABELS[existing_policy]}",
+        ]
+        _print_walkthrough_header("Aktionen", status_lines)
 
         actions = [
-            "🌐  Im Webbrowser visualisieren (Waveform, Phrasen & Cue-Pads ansehen)",
-            "📋  Cue-Vorschläge im Terminal anzeigen (Propose / Details)",
-            "🎛️  Interaktives Review-Studio im Browser öffnen (Cues prüfen & anpassen)",
-            "⚖️  Bestehende Cues vergleichen (Compare Match-Rate)",
-            "💾  Review-Session in Rekordbox anwenden (mit Backup-Abfrage)",
-            "⚙️  Einstellungen ändern (Genre / Hot Cues / Loops / Überschreiben / Playlist)",
-            "🔙  Zurück zum Hauptmenü",
+            "Im Webbrowser visualisieren        (Waveform, Phrasen & Cue-Pads)",
+            "Cue-Vorschläge im Terminal         (Propose / Details)",
+            "Review-Studio im Browser öffnen    (Cues prüfen & anpassen)",
+            "Bestehende Cues vergleichen        (Compare Match-Rate)",
+            "Review-Session anwenden            (in Rekordbox schreiben + Backup)",
+            "Einstellungen ändern               (Genre / Cues / Loops / Überschreiben / Playlist)",
+            "Zurück zum Hauptmenü",
         ]
         action_idx = _menu_choice("Aktion auswählen", actions)
 
         if action_idx == 6:
             return
         elif action_idx == 5:
+            _print_walkthrough_header("Einstellungen ändern", status_lines)
             sub_idx = _menu_choice(
                 "Was möchtest du ändern?",
                 [
@@ -442,19 +468,25 @@ def _run_walkthrough_flow() -> None:
                     "Umgang mit vorhandenen Cues ändern (Überschreiben / Behalten / Nachfragen)",
                     "Playlist / Tracks ändern",
                     "Rekordbox Version (v6 / v7) wechseln",
+                    "Abbrechen / Zurück",
                 ],
             )
             if sub_idx == 0:
+                _print_walkthrough_header("Genre ändern", status_lines)
                 genre_key, profile = _menu_genre()
                 offset = profile.get("default_memory_offset_bars", 16)
                 loop_bars = profile.get("default_loop_bars", 8)
             elif sub_idx == 1:
+                _print_walkthrough_header("Cues & Loops ändern", status_lines)
                 max_hot_cues, use_loops, auto_end_loop, offset, loop_bars = _menu_cue_options(profile, ask_tuning=True)
             elif sub_idx == 2:
+                _print_walkthrough_header("Vorhandene Cues ändern", status_lines)
                 existing_policy = _menu_existing_cues_policy()
             elif sub_idx == 3:
+                _print_walkthrough_header("Playlist & Tracks ändern", status_lines)
                 playlist, track_name, all_tracks = _menu_scope()
             elif sub_idx == 4:
+                _print_walkthrough_header("Rekordbox-Version wechseln", status_lines)
                 _select_rekordbox_version(force_prompt=True)
             continue
 
@@ -468,6 +500,7 @@ def _run_walkthrough_flow() -> None:
             elif action_idx == 3:
                 compare.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops, auto_end_loop)
             elif action_idx == 4:
+                _print_walkthrough_header("Review-Session anwenden", status_lines)
                 safe_name = "".join(c if c.isalnum() or c in " -_" else "" for c in playlist).strip().replace(" ", "-").lower()
                 default_session = pathlib.Path(f"{safe_name}-session.json")
                 if default_session.exists():
@@ -481,6 +514,8 @@ def _run_walkthrough_flow() -> None:
                     if not click.confirm("Diese Einstellung verwenden?", default=True):
                         apply_policy = _menu_existing_cues_policy()
                 apply.callback(session_file, dry_run, False, None, apply_policy)
+        except click.Abort:
+            click.echo("\nVorgang abgebrochen.")
         except (click.ClickException, SystemExit) as exc:
             if isinstance(exc, click.ClickException):
                 click.echo(f"Fehler: {exc}", err=True)
@@ -501,13 +536,13 @@ def _run_menu() -> None:
         if active:
             click.echo(f"Aktiv: Rekordbox {active.version_major} ({active.version_str}) | {active.db_path}")
             click.echo("-" * 38)
-        click.echo("1) 🚀 Walkthrough starten (Rekordbox -> Genre -> Playlist -> Tracks -> Aktion)")
-        click.echo("2) 📋 Cue-Vorschläge anzeigen (Propose)")
-        click.echo("3) 🌐 Visualisierung im Browser öffnen (Viz)")
-        click.echo("4) 🎛️  Cues im Browser prüfen/anpassen (Review Studio)")
-        click.echo("5) 💾 Review-Session anwenden / DB-Backup in Dokumente erstellen")
+        click.echo("1) Walkthrough starten             (Rekordbox -> Genre -> Playlist -> Aktion)")
+        click.echo("2) Cue-Vorschläge anzeigen         (Propose)")
+        click.echo("3) Visualisierung im Browser       (Viz)")
+        click.echo("4) Cues im Browser prüfen/anpassen (Review Studio)")
+        click.echo("5) Review-Session anwenden / DB-Backup erstellen")
         click.echo("6) Beenden")
-        click.echo("7) ⚙️  Rekordbox-Version wählen / wechseln (v6 / v7 / eigener Pfad)")
+        click.echo("7) Rekordbox-Version wechseln      (v6 / v7 / eigener Pfad)")
         click.echo()
 
         try:
@@ -517,11 +552,13 @@ def _run_menu() -> None:
                 return
 
             if choice == "7":
+                click.clear()
                 _select_rekordbox_version(force_prompt=True)
             elif choice == "1":
                 _run_walkthrough_flow()
                 continue
             elif choice == "5":
+                click.clear()
                 _select_rekordbox_version()
                 sub = _menu_choice(
                     "Datenbank-Aktion",
@@ -538,17 +575,23 @@ def _run_menu() -> None:
                     apply_policy = "ask" if dry_run else _menu_existing_cues_policy()
                     apply.callback(session_file, dry_run, False, None, apply_policy)
             else:
+                click.clear()
                 _select_rekordbox_version()
                 # --- SCHRITT 1: Genre auswählen ---
                 genre_key, profile = _menu_genre()
-                click.echo(f"\n[Aktiviert] Genre: {profile['name']} ({profile['bpm_range']})")
 
                 # --- SCHRITT 2: Hot Cues, Loops & Auto-End-Loop ---
+                click.clear()
+                click.echo(f"[Aktiviert] Genre: {profile['name']} ({profile['bpm_range']})")
                 max_hot_cues, use_loops, auto_end_loop, offset, loop_bars = _menu_cue_options(profile, ask_tuning=True)
 
                 # --- SCHRITT 3: Playlist & Tracks ---
+                click.clear()
+                click.echo(f"[Aktiviert] Genre: {profile['name']} | Hot Cues: {max_hot_cues}")
                 click.echo("\n--- PLAYLIST & TRACKS AUSWÄHLEN ---")
                 playlist, track_name, all_tracks = _menu_scope()
+
+                click.clear()
 
                 if choice == "2":
                     propose.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops, auto_end_loop)

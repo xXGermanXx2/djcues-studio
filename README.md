@@ -150,6 +150,10 @@ In fast-paced genres like **Industrial Techno, Hard Techno, Schranz, and Raw Gro
 
 Hier werden alle aktuellen und zukünftigen Neuerungen, Fehlerbehebungen und Optimierungen des Projekts dokumentiert.
 
+### [2026-11-11 (v12)] — Aufgeräumte Walkthrough-Ansicht (Screen-Clear & saubere CMD-Darstellung)
+- **🧹 Sauberes Terminal bei jedem Schritt & jeder Aktion:** [`_run_walkthrough_flow`](src/djcues/cli.py) leert die Konsole nun automatisch vor jedem Setup-Schritt sowie bei jedem erneuten Aufruf des Aktionsmenüs (`click.clear()`). Vorherige Ausgaben und alte Menüs stapeln sich nicht mehr oben darüber.
+- **✨ Keine kaputten `[?]`-Symbole in Windows CMD:** Emojis in Hauptmenü & Walkthrough durch sauber ausgerichtete ASCII-/Text-Labels ersetzt, sodass die Oberfläche auch in `cmd.exe` / `start.bat` gestochen scharf aussieht.
+
 ### [2026-11-11 (v11)] — Fix für `.venv`-Konflikt unter Windows (`uv run` / `.python-version`)
 - **🔧 Fix in [`format_apply_command`](src/djcues/review.py):** Das Review-Studio schlägt unter Windows jetzt **vorrangig die aktive `.venv`** (`.\.venv\Scripts\python.exe -m djcues.cli apply "..."`) vor statt `uv run`, selbst wenn `uv` im System installiert ist. Dadurch versucht `uv` nicht mehr, eine laufende `.venv` zu löschen oder downzugraden (`Zugriff verweigert / os error 5`).
 - **🐍 `.python-version` entfernt:** Verhindert, dass `uv` bei bestehender Python-3.12-`.venv` (über `INSTALL_DEPENDENCIES.bat`) auf `CPython 3.10` zurückwechseln und `.venv\Lib` überschreiben will (`requires-python = ">=3.10"` gilt weiterhin über `pyproject.toml`).

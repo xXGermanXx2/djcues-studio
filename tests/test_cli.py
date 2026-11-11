@@ -92,3 +92,45 @@ def test_apply_command_passes_existing_policy(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert captured["existing_cues"] == "skip"
     assert captured["backup"] is False
+
+
+def test_walkthrough_clears_screen_between_steps_and_actions(monkeypatch):
+    from types import SimpleNamespace
+    import click
+    import djcues.cli as cli_mod
+
+    clear_count = 0
+
+    def fake_clear():
+        nonlocal clear_count
+        clear_count += 1
+
+    monkeypatch.setattr(click, "clear", fake_clear)
+    monkeypatch.setattr(click, "pause", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli_mod, "_select_rekordbox_version", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli_mod, "get_active_db_info", lambda: None)
+    monkeypatch.setattr(cli_mod, "_menu_genre", lambda: ("schranz", {"name": "Schranz", "bpm_range": "150-175 BPM"}))
+    monkeypatch.setattr(cli_mod, "_menu_cue_options", lambda *args, **kwargs: (8, True, True, 16, 8))
+    monkeypatch.setattr(cli_mod, "_menu_existing_cues_policy", lambda: "skip")
+    monkeypatch.setattr(cli_mod, "_menu_scope", lambda: ("Test Playlist", None, True))
+    monkeypatch.setattr(cli_mod, "viz", SimpleNamespace(callback=lambda *args, **kwargs: None))
+
+    # Action choices: 0 (viz) -> loop back (must clear again!) -> 6 (return to main menu)
+    choices = iter([0, 6])
+    seen_action_lists = []
+
+    def fake_choice(title, values):
+        seen_action_lists.append(values)
+        return next(choices)
+
+    monkeypatch.setattr(cli_mod, "_menu_choice", fake_choice)
+
+    cli_mod._run_walkthrough_flow()
+
+    # 5 setup steps (Setup, Genre, Cues & Loops, Vorhandene Cues, Playlist) + 2 action loop draws = 7 clears
+    assert clear_count == 7
+    # No broken emoji variation selectors or tofu-prone icons in action menu
+    for label in seen_action_lists[0]:
+        assert "\ufe0f" not in label
+        assert "🌐" not in label
+        assert "🎛" not in label
