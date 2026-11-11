@@ -1,15 +1,16 @@
-# djcues
+# djcues-studio
 
-Automated hot cue and memory cue placement for rekordbox, based on phrase analysis (PSSI), vocal detection (PVDI), and a standardized cue strategy.
+Automated hot cue and memory cue placement for rekordbox, tailored for **Industrial Techno, Hard Techno, Schranz, Hypnotic & Hard Groove, Bounce, Trance, and EDM** — based on phrase analysis (PSSI), vocal detection (PVDI), waveform bass energy, and a standardized cue strategy.
 
-djcues reads your rekordbox database, analyzes each track's phrase structure and vocal content, proposes cue placements following your cue system, and lets you review, adjust, and apply them back to the database.
+djcues-studio reads your rekordbox database, analyzes each track's phrase structure, waveform bass drops, and vocal content, proposes genre-personalized cue placements, and lets you review, adjust, and safely apply them back to the database (with interactive backup to your Documents folder).
 
 ![Screenshot of djcues visualization](djcues.png)
 
 ## Installation & Schnellstart
 
-### 1-Klick Start unter Windows
-Einfach die Datei **`DJCUES_STUDIO.bat`** (oder **`start.bat`**) im Projektordner per Doppelklick starten! Sie aktiviert automatisch die Python-Umgebung und öffnet das interaktive Walkthrough-Studio.
+### 1-Klick Setup & Start unter Windows
+1. **Abhängigkeiten prüfen/installieren (optional):** Doppelklicke auf **`INSTALL_DEPENDENCIES.bat`** – prüft ob Python 3.10+ installiert ist (bietet ggf. direkte Installation über `winget` an), erstellt bei Bedarf die `.venv`-Umgebung und installiert alle benötigten Pakete (`pyrekordbox`, `click`, `djcues`, `pytest`).
+2. **Studio starten:** Doppelklicke auf **`DJCUES_STUDIO.bat`** (oder **`start.bat`**). Sollte `.venv` oder ein Paket fehlen, wird automatisch zuerst die Einrichtung ausgeführt, bevor das **Walkthrough-Studio** (Genre -> Playlist -> Tracks -> Aktion) öffnet!
 
 ### Manuelle Installation
 Erfordert Python 3.10+ und [uv](https://docs.astral.sh/uv/) oder pip:
@@ -145,6 +146,12 @@ In fast-paced genres like **Industrial Techno, Hard Techno, Schranz, and Raw Gro
 ## Aktualisierungen & Changelog
 
 Hier werden alle aktuellen und zukünftigen Neuerungen, Fehlerbehebungen und Optimierungen des Projekts dokumentiert.
+
+### [2026-11-11 (v5)] — 1-Klick Abhängigkeiten-Installer (`INSTALL_DEPENDENCIES.bat`) & Auto-Setup
+- **📦 `INSTALL_DEPENDENCIES.bat`:**
+  - Neue Setup-Batch-Datei für Windows: Prüft automatisch Python 3.10+ (mit optionaler Installation via `winget`), erstellt `.venv` bei Bedarf und installiert automatisch alle Abhängigkeiten (`pyrekordbox`, `click`, `djcues`, `pytest`).
+- **🔄 Auto-Setup in `DJCUES_STUDIO.bat`:**
+  - `DJCUES_STUDIO.bat` prüft vor jedem Start selbstständig, ob `.venv` und alle Pakete da sind, und stößt bei Bedarf automatisch `INSTALL_DEPENDENCIES.bat` an — echtes Plug & Play.
 
 ### [2026-11-11 (v4)] — Interaktives Rekordbox-Backup in Dokumente
 - **🛡️ Interaktive Backup-Abfrage vor jeder DB-Änderung:**
