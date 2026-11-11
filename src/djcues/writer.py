@@ -99,6 +99,7 @@ def build_cue_rows(
         else:
             out_msec = -1
 
+        is_active = bool(entry.get("active_loop", False)) and is_loop
         hot_rows.append({
             "Kind": slot.kind,
             "InMsec": in_msec,
@@ -111,7 +112,7 @@ def build_cue_rows(
             "OutMpegAbs": 0 if is_loop else -1,
             "Color": slot.hot_cue_color,
             "ColorTableIndex": slot.hot_cue_color_table_index,
-            "ActiveLoop": 0 if is_loop else -1,
+            "ActiveLoop": 1 if is_active else (0 if is_loop else -1),
             "Comment": entry.get("comment") or slot.hot_cue_label,
             "BeatLoopSize": 0,
             "CueMicrosec": 0,
@@ -123,15 +124,17 @@ def build_cue_rows(
             continue
 
         slot_idx = int(slot_num_str) - 1
-        slot = ALL_CUE_SLOTS[slot_idx]
+        slot = ALL_CUE_SLOTS[slot_idx] if slot_idx < len(ALL_CUE_SLOTS) else ALL_CUE_SLOTS[-1]
 
         is_loop = entry.get("loop_end_ms") is not None
+        is_active = bool(entry.get("active_loop", False)) and is_loop
         in_msec = int(entry["position_ms"])
         if is_loop:
             out_msec = int(entry["loop_end_ms"])
         else:
             out_msec = -1
 
+        mem_color = 5 if is_active else slot.memory_cue_color
         mem_rows.append({
             "Kind": 0,
             "InMsec": in_msec,
@@ -142,9 +145,9 @@ def build_cue_rows(
             "OutFrame": 0 if is_loop else -1,
             "OutMpegFrame": 0 if is_loop else -1,
             "OutMpegAbs": 0 if is_loop else -1,
-            "Color": slot.memory_cue_color,
-            "ColorTableIndex": slot.memory_cue_color_table_index,
-            "ActiveLoop": 0 if is_loop else -1,
+            "Color": mem_color,
+            "ColorTableIndex": 0 if is_active else slot.memory_cue_color_table_index,
+            "ActiveLoop": 1 if is_active else (0 if is_loop else -1),
             "Comment": entry.get("comment") or slot.memory_cue_label,
             "BeatLoopSize": 0,
             "CueMicrosec": 0,

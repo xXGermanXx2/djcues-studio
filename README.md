@@ -147,6 +147,12 @@ In fast-paced genres like **Industrial Techno, Hard Techno, Schranz, and Raw Gro
 
 Hier werden alle aktuellen und zukünftigen Neuerungen, Fehlerbehebungen und Optimierungen des Projekts dokumentiert.
 
+### [2026-11-11 (v9)] — Auto-Backup Loop am Trackende (Rekordbox Active Loop)
+- **🛡️ Auto-Loop am Ende als Backup (`--auto-end-loop`):**
+  - Neue Option direkt im Walkthrough-Menü (unter *Hot Cue & Loop Einstellungen* sowie jederzeit im Einstellungs-Untermenü änderbar): **„Auto-Loop am Ende als Backup (Active Loop)“**.
+  - Setzt automatisch einen roten **Rekordbox Active Memory Loop (`ActiveLoop = 1`)** im Outro am Ende des Tracks (sucht automatisch über die Waveform-Spektralanalyse den stabilsten Groove-Bereich im Outro, bzw. platziert ihn sicher vor dem Trackende).
+  - Sobald der Playhead im CDJ oder Rekordbox diesen Punkt erreicht, springt der Track **vollautomatisch in die Endlosschleife**, damit dir beim Mixen nie die Musik ausgeht — funktioniert auch unabhängig davon, ob normale Loops deaktiviert wurden.
+
 ### [2026-11-11 (v8)] — Persistente Aktions-Schleife im Walkthrough
 - **🔁 Nahtlos mehrere Aktionen nacheinander ausführen:**
   - Nach einer Aktion im Walkthrough (z. B. **Im Webbrowser visualisieren**) wirst du nicht mehr direkt ins Hauptmenü zurückgeworfen, sondern bleibst in deiner aktiven Auswahl (Genre, Hot Cues, Loops, Playlist).

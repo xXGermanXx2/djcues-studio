@@ -40,6 +40,7 @@ class CuePoint:
     color_table_index: int | None
     color: int
     comment: str
+    active_loop: bool = False  # True for Rekordbox Active Loop (auto-engages on playback)
 
     @property
     def is_loop(self) -> bool:

@@ -37,6 +37,8 @@ def create_session(
             cues_dict[pad] = {
                 "position_ms": hc.position_ms,
                 "loop_end_ms": hc.loop_end_ms,
+                "comment": hc.comment,
+                "active_loop": hc.active_loop,
                 "status": "pending",
             }
 
@@ -46,6 +48,8 @@ def create_session(
             memory_cues_dict[str(i + 1)] = {
                 "position_ms": mc.position_ms,
                 "loop_end_ms": mc.loop_end_ms,
+                "comment": mc.comment,
+                "active_loop": mc.active_loop,
                 "status": "pending",
             }
 

@@ -112,11 +112,12 @@ def _render_cue_markers(
     for i, cue in enumerate(sorted(memory_cues, key=lambda c: c.position_ms)):
         left_pct = (cue.position_ms / total_ms) * 100
         # Find which pad this memory cue belongs to via comment matching
-        marker_color = "#aaa"
-        for pad, slot in CUE_SYSTEM_BY_PAD.items():
-            if slot.memory_cue_label == cue.comment:
-                marker_color = CUE_COLORS.get(pad, "#aaa")
-                break
+        marker_color = "#e74c3c" if getattr(cue, "active_loop", False) else "#aaa"
+        if not getattr(cue, "active_loop", False):
+            for pad, slot in CUE_SYSTEM_BY_PAD.items():
+                if slot.memory_cue_label == cue.comment:
+                    marker_color = CUE_COLORS.get(pad, "#aaa")
+                    break
         comment = html.escape(cue.comment)
         if abs(left_pct - prev_mem_pct) < OVERLAP_THRESHOLD_PCT:
             mem_nudge_count += 1
@@ -124,11 +125,12 @@ def _render_cue_markers(
             mem_nudge_count = 0
         prev_mem_pct = left_pct
         label_offset = 4 + mem_nudge_count * NUDGE_PX
+        label_text = "AUTO" if getattr(cue, "active_loop", False) else str(i + 1)
         markers.append(
             f'<div class="mem-cue-marker {css_class_prefix}" '
             f'style="left:{left_pct:.4f}%;border-left-color:{marker_color};" '
             f'title="{comment} @ {_format_time(cue.position_ms)}">'
-            f'<span class="marker-label" style="color:{marker_color};left:{label_offset}px;">{i + 1}</span>'
+            f'<span class="marker-label" style="color:{marker_color};left:{label_offset}px;">{label_text}</span>'
             f"</div>"
         )
         # Loop range indicator for memory cues

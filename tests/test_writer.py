@@ -252,3 +252,27 @@ def test_build_cue_rows_respects_no_loops_and_16_pads():
     for row in hot_rows + mem_rows:
         assert row["OutMsec"] == -1
         assert row["ActiveLoop"] == -1
+
+
+def test_build_cue_rows_sets_active_loop_1():
+    from djcues.writer import build_cue_rows
+
+    hot_cues = {}
+    memory_cues = {
+        "9": {
+            "status": "accepted",
+            "position_ms": 210000.0,
+            "loop_end_ms": 225000.0,
+            "comment": "Auto-Backup Loop (Active)",
+            "active_loop": True,
+        }
+    }
+    _, mem_rows = build_cue_rows(hot_cues, memory_cues)
+    assert len(mem_rows) == 1
+    row = mem_rows[0]
+    assert row["Kind"] == 0
+    assert row["InMsec"] == 210000
+    assert row["OutMsec"] == 225000
+    assert row["ActiveLoop"] == 1
+    assert row["Color"] == 5
+    assert row["Comment"] == "Auto-Backup Loop (Active)"

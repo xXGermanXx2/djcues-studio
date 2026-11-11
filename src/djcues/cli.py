@@ -87,10 +87,12 @@ def _print_proposal(proposal, track):
                 break
         loop_info = ""
         if mc.is_loop and mc.loop_end_ms is not None:
-            loop_info = f"  loop→{_format_time(mc.loop_end_ms)}"
+            tag = "AUTO-LOOP→" if getattr(mc, "active_loop", False) else "loop→"
+            loop_info = f"  {tag}{_format_time(mc.loop_end_ms)}"
+        active_badge = " [ACTIVE BACKUP]" if getattr(mc, "active_loop", False) else ""
         click.echo(
-            f"    [{i + 1}] {mc.comment:<20s}  {_format_time(mc.position_ms)}"
-            f"{slot_info}{loop_info}"
+            f"    [{i + 1}] {mc.comment:<24s}  {_format_time(mc.position_ms)}"
+            f"{slot_info}{loop_info}{active_badge}"
         )
 
     # Notes
@@ -308,8 +310,8 @@ def _select_rekordbox_version(force_prompt: bool = False) -> None:
             raise click.ClickException(f"Datenbank konnte nicht geöffnet werden: {exc}")
 
 
-def _menu_cue_options(profile: dict, ask_tuning: bool = True) -> tuple[int, bool, int, int]:
-    """Ask user for Hot Cue count (4, 8, 12, 16) and whether to include Loops."""
+def _menu_cue_options(profile: dict, ask_tuning: bool = True) -> tuple[int, bool, bool, int, int]:
+    """Ask user for Hot Cue count (4, 8, 12, 16), normal Loops, and Auto-Backup End Loop."""
     click.echo("\n--- HOT CUE & LOOP EINSTELLUNGEN ---")
     cue_choices = [
         "8 Hot Cues  (Standard: Pads A–H)",
@@ -321,13 +323,22 @@ def _menu_cue_options(profile: dict, ask_tuning: bool = True) -> tuple[int, bool
     max_hot_cues = [8, 4, 12, 16][c_idx]
 
     loop_idx = _menu_choice(
-        "Sollen Loops erstellt werden?",
+        "Sollen normale Loops erstellt werden?",
         [
             "Ja — mit Loops (z. B. für Bassline-Intro & Outro)",
             "Nein — keine Loops (nur normale Cue-Punkte)",
         ],
     )
     use_loops = loop_idx == 0
+
+    auto_end_idx = _menu_choice(
+        "Auto-Loop am Ende als Backup (Active Loop — greift automatisch am Trackende)?",
+        [
+            "Ja — Auto-Backup-Loop am Ende aktivieren (verhindert plötzliches Track-Ende)",
+            "Nein — kein automatischer Backup-Loop am Ende",
+        ],
+    )
+    auto_end_loop = auto_end_idx == 0
 
     def_loop = profile.get("default_loop_bars", 8)
     def_offset = profile.get("default_memory_offset_bars", 16)
@@ -336,14 +347,14 @@ def _menu_cue_options(profile: dict, ask_tuning: bool = True) -> tuple[int, bool
         offset = click.prompt(f"Memory-Cue-Abstand in Takten ({profile['name']} Standard)", default=def_offset, type=int)
         loop_bars = (
             click.prompt(f"Loop-Länge in Takten ({profile['name']} Standard)", default=def_loop, type=int)
-            if use_loops
+            if (use_loops or auto_end_loop)
             else def_loop
         )
     else:
         offset = def_offset
         loop_bars = def_loop
 
-    return max_hot_cues, use_loops, offset, loop_bars
+    return max_hot_cues, use_loops, auto_end_loop, offset, loop_bars
 
 
 def _run_walkthrough_flow() -> None:
@@ -362,10 +373,11 @@ def _run_walkthrough_flow() -> None:
     genre_key, profile = _menu_genre()
     click.echo(f"\n[Aktiviert] Genre: {profile['name']} ({profile['bpm_range']})")
 
-    # 2. Hot Cue Count & Loops
-    max_hot_cues, use_loops, offset, loop_bars = _menu_cue_options(profile, ask_tuning=False)
+    # 2. Hot Cue Count, Loops & Auto-End-Loop
+    max_hot_cues, use_loops, auto_end_loop, offset, loop_bars = _menu_cue_options(profile, ask_tuning=False)
     loop_txt = f"{loop_bars} Takte" if use_loops else "Aus"
-    click.echo(f"  • Hot Cues: {max_hot_cues} | Loops: {loop_txt} | Memory-Offset: {offset} Takte")
+    auto_txt = f"Aktiv ({loop_bars} Takte)" if auto_end_loop else "Aus"
+    click.echo(f"  • Hot Cues: {max_hot_cues} | Loops: {loop_txt} | Auto-End-Loop: {auto_txt} | Offset: {offset} Takte")
 
     # 3. Playlist & Tracks
     click.echo("\n--- SCHRITT 3: PLAYLIST & TRACKS AUSWÄHLEN ---")
@@ -374,10 +386,11 @@ def _run_walkthrough_flow() -> None:
     # 4. Persistent Action Loop (stay here so user can run multiple actions in a row)
     while True:
         loop_txt = f"{loop_bars} Takte" if use_loops else "Aus"
+        auto_txt = f"Aktiv ({loop_bars} Takte)" if auto_end_loop else "Aus"
         scope_txt = "Alle Tracks" if all_tracks else (track_name or "Auswahl")
         click.echo("\n" + "=" * 65)
         click.echo(f"  Aktiv: {profile['name']} | Playlist: {playlist} ({scope_txt})")
-        click.echo(f"  Cues: {max_hot_cues} Hot Cues | Loops: {loop_txt} | Offset: {offset} Takte")
+        click.echo(f"  Cues: {max_hot_cues} | Loops: {loop_txt} | Auto-End-Loop: {auto_txt} | Offset: {offset} Takte")
         click.echo("=" * 65)
 
         actions = [
@@ -386,7 +399,7 @@ def _run_walkthrough_flow() -> None:
             "🎛️  Interaktives Review-Studio im Browser öffnen (Cues prüfen & anpassen)",
             "⚖️  Bestehende Cues vergleichen (Compare Match-Rate)",
             "💾  Review-Session in Rekordbox anwenden (mit Backup-Abfrage)",
-            "⚙️  Einstellungen ändern (Genre / Hot Cues / Loops / Playlist)",
+            "⚙️  Einstellungen ändern (Genre / Hot Cues / Loops / Auto-End-Loop / Playlist)",
             "🔙  Zurück zum Hauptmenü",
         ]
         action_idx = _menu_choice("Aktion auswählen", actions)
@@ -398,7 +411,7 @@ def _run_walkthrough_flow() -> None:
                 "Was möchtest du ändern?",
                 [
                     "Genre ändern",
-                    "Hot Cue Anzahl / Loops / Takte ändern",
+                    "Hot Cue Anzahl / Loops / Auto-End-Loop / Takte ändern",
                     "Playlist / Tracks ändern",
                     "Rekordbox Version (v6 / v7) wechseln",
                 ],
@@ -408,7 +421,7 @@ def _run_walkthrough_flow() -> None:
                 offset = profile.get("default_memory_offset_bars", 16)
                 loop_bars = profile.get("default_loop_bars", 8)
             elif sub_idx == 1:
-                max_hot_cues, use_loops, offset, loop_bars = _menu_cue_options(profile, ask_tuning=True)
+                max_hot_cues, use_loops, auto_end_loop, offset, loop_bars = _menu_cue_options(profile, ask_tuning=True)
             elif sub_idx == 2:
                 playlist, track_name, all_tracks = _menu_scope()
             elif sub_idx == 3:
@@ -417,13 +430,13 @@ def _run_walkthrough_flow() -> None:
 
         try:
             if action_idx == 0:
-                viz.callback(playlist, track_name, all_tracks, False, offset, loop_bars, None, genre_key, max_hot_cues, use_loops)
+                viz.callback(playlist, track_name, all_tracks, False, offset, loop_bars, None, genre_key, max_hot_cues, use_loops, auto_end_loop)
             elif action_idx == 1:
-                propose.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops)
+                propose.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops, auto_end_loop)
             elif action_idx == 2:
-                review.callback(playlist, track_name, all_tracks, offset, loop_bars, None, genre_key, max_hot_cues, use_loops)
+                review.callback(playlist, track_name, all_tracks, offset, loop_bars, None, genre_key, max_hot_cues, use_loops, auto_end_loop)
             elif action_idx == 3:
-                compare.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops)
+                compare.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops, auto_end_loop)
             elif action_idx == 4:
                 safe_name = "".join(c if c.isalnum() or c in " -_" else "" for c in playlist).strip().replace(" ", "-").lower()
                 default_session = pathlib.Path(f"{safe_name}-session.json")
@@ -496,22 +509,22 @@ def _run_menu() -> None:
                 genre_key, profile = _menu_genre()
                 click.echo(f"\n[Aktiviert] Genre: {profile['name']} ({profile['bpm_range']})")
 
-                # --- SCHRITT 2: Hot Cues & Loops ---
-                max_hot_cues, use_loops, offset, loop_bars = _menu_cue_options(profile, ask_tuning=True)
+                # --- SCHRITT 2: Hot Cues, Loops & Auto-End-Loop ---
+                max_hot_cues, use_loops, auto_end_loop, offset, loop_bars = _menu_cue_options(profile, ask_tuning=True)
 
                 # --- SCHRITT 3: Playlist & Tracks ---
                 click.echo("\n--- PLAYLIST & TRACKS AUSWÄHLEN ---")
                 playlist, track_name, all_tracks = _menu_scope()
 
                 if choice == "2":
-                    propose.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops)
+                    propose.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops, auto_end_loop)
                 elif choice == "3":
                     compare_mode = click.confirm("Bestehende und vorgeschlagene Cues vergleichen?", default=False)
                     output = click.prompt("Ausgabedatei (leer = automatisch)", default="", show_default=False) or None
-                    viz.callback(playlist, track_name, all_tracks, compare_mode, offset, loop_bars, output, genre_key, max_hot_cues, use_loops)
+                    viz.callback(playlist, track_name, all_tracks, compare_mode, offset, loop_bars, output, genre_key, max_hot_cues, use_loops, auto_end_loop)
                 elif choice == "4":
                     output = click.prompt("Ausgabeordner (leer = aktueller Ordner)", default="", show_default=False) or None
-                    review.callback(playlist, track_name, all_tracks, offset, loop_bars, output, genre_key, max_hot_cues, use_loops)
+                    review.callback(playlist, track_name, all_tracks, offset, loop_bars, output, genre_key, max_hot_cues, use_loops, auto_end_loop)
 
             click.echo()
             click.pause("Enter drücken, um zum Menü zurückzukehren")
@@ -556,7 +569,8 @@ def menu():
 @click.option("--genre", "-g", default="auto", show_default=True, help="Genre profile (industrial, hard_techno, schranz, hypnotic_groove, hard_groove, bounce, trance, general)")
 @click.option("--hot-cues", "-c", default=8, show_default=True, type=int, help="Number of hot cues (4, 8, 12, or 16).")
 @click.option("--loops/--no-loops", default=True, show_default=True, help="Enable or disable loop cues.")
-def propose(playlist_name, track_name, all_tracks, offset, loop_bars, genre="auto", hot_cues=8, loops=True):
+@click.option("--auto-end-loop/--no-auto-end-loop", default=False, show_default=True, help="Add an Active Auto-Backup Loop at track end.")
+def propose(playlist_name, track_name, all_tracks, offset, loop_bars, genre="auto", hot_cues=8, loops=True, auto_end_loop=False):
     """Propose cue placements for tracks in a playlist."""
     playlist = find_playlist(playlist_name)
     if playlist is None:
@@ -570,6 +584,7 @@ def propose(playlist_name, track_name, all_tracks, offset, loop_bars, genre="aut
         loop_length_bars=loop_bars,
         max_hot_cues=hot_cues,
         use_loops=loops,
+        auto_end_loop=auto_end_loop,
     )
 
     for t in tracks:
@@ -586,7 +601,8 @@ def propose(playlist_name, track_name, all_tracks, offset, loop_bars, genre="aut
 @click.option("--genre", "-g", default="auto", show_default=True, help="Genre profile (industrial, hard_techno, schranz, hypnotic_groove, hard_groove, bounce, trance, general)")
 @click.option("--hot-cues", "-c", default=8, show_default=True, type=int, help="Number of hot cues (4, 8, 12, or 16).")
 @click.option("--loops/--no-loops", default=True, show_default=True, help="Enable or disable loop cues.")
-def compare(playlist_name, track_name, all_tracks, offset, loop_bars, genre="auto", hot_cues=8, loops=True):
+@click.option("--auto-end-loop/--no-auto-end-loop", default=False, show_default=True, help="Add an Active Auto-Backup Loop at track end.")
+def compare(playlist_name, track_name, all_tracks, offset, loop_bars, genre="auto", hot_cues=8, loops=True, auto_end_loop=False):
     """Compare existing cues with proposed placements."""
     playlist = find_playlist(playlist_name)
     if playlist is None:
@@ -600,6 +616,7 @@ def compare(playlist_name, track_name, all_tracks, offset, loop_bars, genre="aut
         loop_length_bars=loop_bars,
         max_hot_cues=hot_cues,
         use_loops=loops,
+        auto_end_loop=auto_end_loop,
     )
 
     total_matches = 0
@@ -628,7 +645,8 @@ def compare(playlist_name, track_name, all_tracks, offset, loop_bars, genre="aut
 @click.option("--genre", "-g", default="auto", show_default=True, help="Genre profile (industrial, hard_techno, schranz, hypnotic_groove, hard_groove, bounce, trance, general)")
 @click.option("--hot-cues", "-c", default=8, show_default=True, type=int, help="Number of hot cues (4, 8, 12, or 16).")
 @click.option("--loops/--no-loops", default=True, show_default=True, help="Enable or disable loop cues.")
-def viz(playlist, track_name, all_tracks, compare_mode, offset, loop_bars, output, genre="auto", hot_cues=8, loops=True):
+@click.option("--auto-end-loop/--no-auto-end-loop", default=False, show_default=True, help="Add an Active Auto-Backup Loop at track end.")
+def viz(playlist, track_name, all_tracks, compare_mode, offset, loop_bars, output, genre="auto", hot_cues=8, loops=True, auto_end_loop=False):
     """Generate an HTML timeline visualization."""
     import pathlib
     import webbrowser
@@ -646,6 +664,7 @@ def viz(playlist, track_name, all_tracks, compare_mode, offset, loop_bars, outpu
         loop_length_bars=loop_bars,
         max_hot_cues=hot_cues,
         use_loops=loops,
+        auto_end_loop=auto_end_loop,
     )
 
     if all_tracks:
@@ -682,7 +701,8 @@ def viz(playlist, track_name, all_tracks, compare_mode, offset, loop_bars, outpu
 @click.option("--genre", "-g", default="auto", show_default=True, help="Genre profile (industrial, hard_techno, schranz, hypnotic_groove, hard_groove, bounce, trance, general)")
 @click.option("--hot-cues", "-c", default=8, show_default=True, type=int, help="Number of hot cues (4, 8, 12, or 16).")
 @click.option("--loops/--no-loops", default=True, show_default=True, help="Enable or disable loop cues.")
-def review(playlist, track_name, all_tracks, offset, loop_bars, output, genre="auto", hot_cues=8, loops=True):
+@click.option("--auto-end-loop/--no-auto-end-loop", default=False, show_default=True, help="Add an Active Auto-Backup Loop at track end.")
+def review(playlist, track_name, all_tracks, offset, loop_bars, output, genre="auto", hot_cues=8, loops=True, auto_end_loop=False):
     """Launch interactive review session in browser."""
     import pathlib
     import time
@@ -702,6 +722,7 @@ def review(playlist, track_name, all_tracks, offset, loop_bars, output, genre="a
         loop_length_bars=loop_bars,
         max_hot_cues=hot_cues,
         use_loops=loops,
+        auto_end_loop=auto_end_loop,
     )
     pairs = [(t, strategy.propose(t)) for t in selected]
 

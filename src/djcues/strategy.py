@@ -126,6 +126,7 @@ class CueStrategy:
         tempo_adaptive: bool = True,
         max_hot_cues: int = 8,
         use_loops: bool = True,
+        auto_end_loop: bool = False,
     ) -> None:
         self.genre = genre
         self._user_memory_offset = memory_offset_bars
@@ -133,6 +134,7 @@ class CueStrategy:
         self.tempo_adaptive = tempo_adaptive
         self.max_hot_cues = max(1, min(16, max_hot_cues))
         self.use_loops = use_loops
+        self.auto_end_loop = auto_end_loop
 
     @property
     def memory_offset_bars(self) -> int:
@@ -185,9 +187,10 @@ class CueStrategy:
         pre_drop_f = profile.get("pre_drop_f_beats", 32)
 
         loop_status = f"{effective_loop_bars} Takte" if self.use_loops else "Aus (nur Cue-Punkte)"
+        auto_end_status = "Aktiv" if self.auto_end_loop else "Aus"
         notes.append(
             f"Genre-Profil: {profile['name']} ({profile['bpm_range']}) "
-            f"— Hot Cues: {self.max_hot_cues}, Loops: {loop_status}, Memory-Offset: {effective_offset_bars} Takte"
+            f"— Hot Cues: {self.max_hot_cues}, Loops: {loop_status}, Auto-End-Loop: {auto_end_status}, Offset: {effective_offset_bars} Takte"
         )
 
         positions: dict[str, float] = {}
@@ -603,6 +606,45 @@ class CueStrategy:
                 color=mc_color,
                 comment=mem_label,
             ))
+
+        # --- Auto-End-Loop (Rekordbox Active Loop Backup at track end) ---
+        if self.auto_end_loop and track.duration_ms > 0:
+            search_start = max(bg.beat_to_ms(1), track.duration_ms - bg.bars_to_ms(24))
+            search_end = max(search_start + bg.bars_to_ms(2), track.duration_ms - bg.bars_to_ms(1))
+            stable = _find_stable_loop(
+                track,
+                search_start_ms=search_start,
+                search_end_ms=search_end,
+                bar_sizes=(effective_loop_bars, 8, 4, 2),
+                min_energy=0.05,
+                min_similarity=0.65,
+            )
+            if stable is not None:
+                auto_pos_ms, auto_bars, _ = stable
+            else:
+                # Place safely effective_loop_bars + 1 bars before track end, aligned to bar start
+                auto_bars = effective_loop_bars
+                total_beats = bg.ms_to_beat(track.duration_ms)
+                while auto_bars > 2 and bg.bars_to_ms(auto_bars + 1) >= track.duration_ms * 0.4:
+                    auto_bars //= 2
+                target_beat = max(1, total_beats - (auto_bars * 4) - 4)
+                bar_beat = ((target_beat - 1) // 4) * 4 + 1
+                auto_pos_ms = bg.beat_to_ms(bar_beat)
+
+            auto_end_ms = min(track.duration_ms, auto_pos_ms + bg.bars_to_ms(auto_bars))
+            memory_cues.append(CuePoint(
+                kind=0,
+                position_ms=auto_pos_ms,
+                loop_end_ms=auto_end_ms,
+                color_table_index=0,
+                color=5,  # Red (Rekordbox Active Loop indicator)
+                comment="Auto-Backup Loop (Active)",
+                active_loop=True,
+            ))
+            notes.append(
+                f"Auto-End-Loop (Active Loop): {auto_bars} Takte Backup-Loop ab Beat "
+                f"{bg.ms_to_beat(auto_pos_ms)} (aktiviert automatisch am Ende)"
+            )
 
         return CueProposal(
             track=track,

@@ -489,3 +489,19 @@ def test_no_loops_mode(world_gone_wild: Track):
     prop = strat.propose(world_gone_wild)
     assert all(not c.is_loop and c.loop_end_ms is None for c in prop.hot_cues)
     assert all(not c.is_loop and c.loop_end_ms is None for c in prop.memory_cues)
+
+
+def test_auto_end_loop_backup(world_gone_wild: Track):
+    """auto_end_loop adds a dedicated Active Loop Memory Cue near the track end even if use_loops=False."""
+    strat = CueStrategy(use_loops=False, auto_end_loop=True)
+    prop = strat.propose(world_gone_wild)
+
+    active_cues = [c for c in prop.memory_cues if c.active_loop]
+    assert len(active_cues) == 1
+    auto_cue = active_cues[0]
+    assert auto_cue.kind == 0
+    assert auto_cue.is_loop
+    assert auto_cue.loop_end_ms is not None
+    assert auto_cue.loop_end_ms <= world_gone_wild.duration_ms
+    assert auto_cue.position_ms >= world_gone_wild.duration_ms * 0.70
+    assert "Auto-Backup Loop" in auto_cue.comment
