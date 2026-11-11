@@ -43,3 +43,14 @@ def test_pwv5_stale_count_uses_available_payload():
     payload = struct.pack(">IIIH", 2, 999999, 0x00960305, 0x7C00)
     points = _decode_waveform_tag("PWV5", 24, _tag(b"PWV5", payload))
     assert len(points) == 1
+
+
+def test_decodes_real_pmai_header_and_prefers_pwv5_over_pwv3():
+    pwv3_payload = struct.pack(">III", 1, 2, 0) + bytes([10, 20])
+    pwv5_payload = struct.pack(">IIIH", 2, 1, 0x00960305, (7 << 12) | (0 << 9) | (0 << 6) | (31 << 2))
+    body = _tag(b"PWV3", pwv3_payload) + _tag(b"PWV5", pwv5_payload)
+    pmai_file = struct.pack(">4sII", b"PMAI", 28, 28 + len(body)) + (b"\0" * 16) + body
+    points = _decode_waveform_file(pmai_file, max_points=800)
+    assert len(points) == 1
+    assert points[0].red == 7
+    assert points[0].height == 1.0

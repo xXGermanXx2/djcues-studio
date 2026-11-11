@@ -413,3 +413,47 @@ def test_trance_profile():
     assert hot_g.comment == "Euphoric Climax / Drop"
     hot_h = next(c for c in prop.hot_cues if c.kind == 9)
     assert hot_h.loop_end_ms == hot_h.position_ms + bg.bars_to_ms(16)
+
+
+def test_schranz_emotional_breakdown_detection():
+    """Schranz tracks often tag emotional vocal breaks as Up between Choruses; waveform bass drop detects Pad E."""
+    from djcues.models import WaveformPoint
+
+    bg = BeatGrid(first_beat_ms=0.0, bpm=158.0)
+    phrases = [
+        Phrase(beat_start=1, beat_end=33, kind=1, label="Intro",
+               position_ms=bg.beat_to_ms(1), duration_ms=bg.bars_to_ms(8)),
+        Phrase(beat_start=33, beat_end=129, kind=2, label="Up",
+               position_ms=bg.beat_to_ms(33), duration_ms=bg.bars_to_ms(24)),
+        Phrase(beat_start=129, beat_end=257, kind=5, label="Chorus",
+               position_ms=bg.beat_to_ms(129), duration_ms=bg.bars_to_ms(32)),
+        Phrase(beat_start=257, beat_end=321, kind=2, label="Up",
+               position_ms=bg.beat_to_ms(257), duration_ms=bg.bars_to_ms(16)),
+        Phrase(beat_start=321, beat_end=545, kind=5, label="Chorus",
+               position_ms=bg.beat_to_ms(321), duration_ms=bg.bars_to_ms(56)),
+        Phrase(beat_start=545, beat_end=609, kind=6, label="Outro",
+               position_ms=bg.beat_to_ms(545), duration_ms=bg.bars_to_ms(16)),
+    ]
+    total_ms = bg.beat_to_ms(609)
+    # Build waveform: Chorus has high bass (6), Up breakdown at 257-321 has low bass (1)
+    wf = []
+    for i in range(400):
+        pos = (i / 400) * total_ms
+        if bg.beat_to_ms(257) <= pos < bg.beat_to_ms(321):
+            wf.append(WaveformPoint(height=0.4, red=1, green=3, blue=5))
+        else:
+            wf.append(WaveformPoint(height=0.9, red=6, green=2, blue=2))
+
+    track = Track(
+        id=205, title="Emotional Schranz Track", artist="Schranz DJ", bpm=158.0,
+        duration_ms=total_ms, analysis_path="", cues=[], phrases=phrases,
+        beat_grid=bg, waveform=wf,
+    )
+    strat = CueStrategy(genre="schranz")
+    prop = strat.propose(track)
+
+    hot_e = next(c for c in prop.hot_cues if c.kind == 6)
+    assert hot_e.comment == "Emotional / Vocal Breakdown"
+    assert hot_e.position_ms == bg.beat_to_ms(257)
+    hot_b = next(c for c in prop.hot_cues if c.kind == 2)
+    assert hot_b.loop_end_ms == hot_b.position_ms + bg.bars_to_ms(8)

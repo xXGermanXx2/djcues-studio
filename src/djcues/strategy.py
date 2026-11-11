@@ -6,6 +6,17 @@ from djcues.constants import CUE_SYSTEM, CUE_SYSTEM_BY_PAD, get_genre_profile
 from djcues.models import BeatGrid, CuePoint, CueProposal, Phrase, Track
 
 
+def _phrase_bass_energy(track: Track, phrase: Phrase) -> float | None:
+    """Return average bass (red) energy (0.0-7.0) across a phrase from waveform data."""
+    if not track.waveform or track.duration_ms <= 0:
+        return None
+    n = len(track.waveform)
+    i0 = max(0, min(n - 1, int(n * phrase.position_ms / track.duration_ms)))
+    i1 = max(i0 + 1, min(n, int(n * (phrase.position_ms + phrase.duration_ms) / track.duration_ms)))
+    pts = track.waveform[i0:i1]
+    return sum(pt.red for pt in pts) / len(pts) if pts else None
+
+
 def _spectral_similarity(wf_points: list, i0: int, i_mid: int, i1: int) -> float:
     """Compare the RGB (bass/mid/treble) profile of two halves of a waveform section.
 
@@ -132,7 +143,9 @@ class CueStrategy:
         if self.genre and self.genre.lower() != "auto":
             return get_genre_profile(self.genre)
         # Automatic detection based on track BPM
-        if track.bpm >= 152.0:
+        if track.bpm >= 158.0:
+            return get_genre_profile("schranz")
+        elif track.bpm >= 150.0:
             return get_genre_profile("industrial")
         elif track.bpm >= 142.0:
             return get_genre_profile("hard_groove")
@@ -287,7 +300,7 @@ class CueStrategy:
             confidence["C"] = 0.80
             notes.append(f"C ({labels['C']}): {first_breakdown.label} at beat {first_breakdown.beat_start}")
         else:
-            # Fallback: distinct pre-drop Up/Verse phrase, strictly not duplicating B
+            # Fallback: distinct pre-drop Up/Verse phrase, or early transition strictly between B and G
             pre_drop_phrases = [
                 p for p in before_drop
                 if p.label in ("Up", "Verse1", "Verse2", "Verse3", "Verse4", "Verse5", "Verse6")
@@ -298,6 +311,20 @@ class CueStrategy:
                 positions["C"] = fallback.position_ms
                 confidence["C"] = 0.50
                 notes.append(f"C ({labels['C']}): no Down/Bridge; fallback to {fallback.label} at beat {fallback.beat_start}")
+            elif before_drop and "G" in positions:
+                # e.g. early intro drop / transition before the main climax
+                early_transitions = [
+                    p for p in before_drop
+                    if p.position_ms <= positions["G"] - bg.bars_to_ms(4)
+                ]
+                if early_transitions:
+                    fallback = early_transitions[0]
+                    positions["C"] = fallback.position_ms
+                    confidence["C"] = 0.45
+                    notes.append(f"C ({labels['C']}): pre-drop transition ({fallback.label}) at beat {fallback.beat_start}")
+                else:
+                    confidence["C"] = 0.0
+                    notes.append(f"C ({labels['C']}): no suitable pre-drop phrase found")
             elif not phrases and "G" in positions and positions["G"] > min_c_ms:
                 # Grid fallback for tracks without PSSI
                 mid_beat = ((bg.ms_to_beat((positions["B"] + positions["G"]) / 2) - 1) // 8) * 8 + 1
@@ -328,15 +355,45 @@ class CueStrategy:
                 positions["E"] = main_breakdown.position_ms
                 confidence["E"] = 0.85
                 notes.append(f"E ({labels['E']}): {main_breakdown.label} at beat {main_breakdown.beat_start}")
+            elif phrases:
+                # In Emotional Schranz & Hard Techno, Rekordbox often tags loud vocal/synth
+                # breakdowns between Choruses as "Up" or "Verse" instead of "Down".
+                # Identify them by checking phrases between drops or checking waveform bass drop!
+                mid_breaks = [
+                    p for p in phrases
+                    if p.position_ms > positions["G"]
+                    and p.label not in ("Chorus", "Intro", "Outro")
+                ]
+                if mid_breaks:
+                    # Prefer phrase with lowest bass energy (if waveform exists) or longest duration
+                    def _break_score(ph: Phrase) -> tuple:
+                        bass = _phrase_bass_energy(track, ph)
+                        # Higher score = better breakdown: lower bass, longer duration
+                        bass_score = -(bass if bass is not None else 4.0)
+                        is_before_last_chorus = 1 if (choruses and ph.position_ms < choruses[-1].position_ms) else 0
+                        return (is_before_last_chorus, bass_score, ph.duration_ms)
+
+                    best_break = max(mid_breaks, key=_break_score)
+                    bass_val = _phrase_bass_energy(track, best_break)
+                    # Accept if it sits between drops or shows a real bass drop
+                    if (choruses and best_break.position_ms < choruses[-1].position_ms) or (bass_val is not None and bass_val <= 3.5):
+                        positions["E"] = best_break.position_ms
+                        confidence["E"] = 0.75 if bass_val is not None and bass_val <= 3.5 else 0.65
+                        notes.append(
+                            f"E ({labels['E']}): vocal/emotional breakdown ({best_break.label}) at beat {best_break.beat_start}"
+                        )
+                    else:
+                        confidence["E"] = 0.0
+                        notes.append(f"E ({labels['E']}): no breakdown found after Main Drop")
+                else:
+                    confidence["E"] = 0.0
+                    notes.append(f"E ({labels['E']}): no Down/Bridge found after Main Drop")
             elif not phrases:
                 # Grid fallback
                 e_beat = ((bg.ms_to_beat(track.duration_ms * 0.65) - 1) // 16) * 16 + 1
                 positions["E"] = bg.beat_to_ms(e_beat)
                 confidence["E"] = 0.40
                 notes.append(f"E ({labels['E']}): grid-based 65% fallback at beat {e_beat}")
-            else:
-                confidence["E"] = 0.0
-                notes.append(f"E ({labels['E']}): no Down/Bridge found after Main Drop")
         else:
             confidence["D"] = confidence["F"] = 0.0
             notes.append("D/F: no Main Drop available for beat-offset markers")

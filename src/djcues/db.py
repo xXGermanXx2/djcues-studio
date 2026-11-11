@@ -120,7 +120,7 @@ def _decode_phrase_file(data: bytes, beat_grid: BeatGrid) -> list[Phrase]:
     import struct
 
     pos = 0
-    if data[:4] == b"ANLZ" and len(data) >= 8:
+    if data[:4] in (b"PMAI", b"ANLZ") and len(data) >= 8:
         file_header_len = struct.unpack_from(">I", data, 4)[0]
         if 12 <= file_header_len <= len(data):
             pos = file_header_len
@@ -224,12 +224,16 @@ def _extract_waveform(track_content: Any, max_points: int = 800) -> list[Wavefor
 
 
 def _decode_waveform_file(data: bytes, max_points: int = 800) -> list[WaveformPoint]:
-    """Decode waveform tags from raw ANLZ bytes without Construct parsing."""
+    """Decode waveform tags from raw ANLZ bytes without Construct parsing.
+
+    Prefers the highest-resolution color/3-band waveform available in the file
+    (PWV7 > PWV5 > PWV3 > PWV6 > PWV4) rather than concatenating multiple tags.
+    """
     import struct
 
-    points: list[WaveformPoint] = []
+    decoded_by_tag: dict[str, list[WaveformPoint]] = {}
     pos = 0
-    if data[:4] == b"ANLZ" and len(data) >= 8:
+    if data[:4] in (b"PMAI", b"ANLZ") and len(data) >= 8:
         file_header_len = struct.unpack_from(">I", data, 4)[0]
         if 12 <= file_header_len <= len(data):
             pos = file_header_len
@@ -244,9 +248,16 @@ def _decode_waveform_file(data: bytes, max_points: int = 800) -> list[WaveformPo
             pos += 1
             continue
         if tag_type in (b"PWV3", b"PWV4", b"PWV5", b"PWV6", b"PWV7"):
-            points.extend(_decode_waveform_tag(tag_type.decode("ascii"), header_len, data[pos : pos + tag_len]))
+            tag_name = tag_type.decode("ascii")
+            pts = _decode_waveform_tag(tag_name, header_len, data[pos : pos + tag_len])
+            if pts:
+                decoded_by_tag[tag_name] = pts
         pos += tag_len
-    return _downsample_waveform(points, max_points)
+
+    for preferred in ("PWV7", "PWV5", "PWV3", "PWV6", "PWV4"):
+        if preferred in decoded_by_tag:
+            return _downsample_waveform(decoded_by_tag[preferred], max_points)
+    return []
 
 
 def _decode_waveform_tag(tag_type: str, header_len: int, tag_data: bytes) -> list[WaveformPoint]:

@@ -146,6 +146,14 @@ In fast-paced genres like **Industrial Techno, Hard Techno, Schranz, and Raw Gro
 
 Hier werden alle aktuellen und zukünftigen Neuerungen, Fehlerbehebungen und Optimierungen des Projekts dokumentiert.
 
+### [2026-11-11 (v3)] — Eigenes Schranz-Profil & Kritischer Rekordbox Waveform-Fix (`PMAI`)
+- **⚡ Eigenes Profil: Schranz / Emotional Schranz (150–175 BPM):**
+  - Speziell für modernen und Emotional Schranz optimiert (8-Takt-Loops bei hohen Geschwindigkeiten, maßgeschneiderte Labels wie *Schranz Kick / Loop Entry* und *Emotional / Vocal Breakdown*).
+  - **Waveform-gestützte Breakdown-Erkennung:** Rekordbox markiert laute Vocal-/Synth-Breakdowns im Emotional Schranz oft als `Up` statt `Down`. Die Strategie erkennt solche kickfreien Breakdowns nun automatisch am Abfall der Bass-Energie in der Waveform (und an Übergängen zwischen Chorus-Blöcken), sodass Pad E (Main Breakdown) und Pad C zuverlässig sitzen.
+- **🐛 Bugfix im Rekordbox ANLZ-Decoder (`PMAI` Header & Detail-Priorisierung):**
+  - Echte Rekordbox-Analyse-Dateien starten mit dem Magic-Header `PMAI` (nicht `ANLZ`). Durch den vorherigen Fehler wurden beim Einlesen echter Tracks 0 Waveform-Punkte geladen! Jetzt werden alle 800 hochauflösenden Farb-/3-Band-Waveform-Punkte korrekt ausgelesen.
+  - Statt `PWV3`, `PWV5` und `PWV4` fälschlich aneinanderzuhängen, wählt der Decoder nun sauber die beste Detail-Waveform (`PWV7 > PWV5 > PWV3 > PWV6 > PWV4`).
+
 ### [2026-11-10 (v2)] — Walkthrough-Studio & Genre-Personalisierung (Groove, Bounce, Trance)
 - **🎛️ Walkthrough-Menü (`DJCUES_STUDIO.bat` & `start.bat`):**
   - Neuer interaktiver 4-Schritte-Walkthrough: **1. Genre auswählen** -> **2. Playlist auswählen** -> **3. Tracks (Alle oder Einzeltrack)** -> **4. Aktion wählen** (Browser-Visualisierung, Terminal-Vorschau, Review Studio oder Vergleich).

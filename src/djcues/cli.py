@@ -224,7 +224,8 @@ def _menu_genre() -> tuple[str, dict]:
     click.echo("Wähle dein Genre, um Cues, Loops & Offsets optimal zu personalisieren:\n")
     genre_list = [
         ("industrial", "Industrial Techno", "145–165 BPM | Verzerrte Kicks, Dark Rumbles, 8-Takt-Loops"),
-        ("hard_techno", "Hard Techno / Schranz", "150–165+ BPM | Gnadenloser Drive & Schranz Climax"),
+        ("hard_techno", "Hard Techno", "148–165 BPM | Gnadenloser Drive & wuchtige Drops"),
+        ("schranz", "Schranz / Emotional", "150–175 BPM | Treibende Schranz-Loops, Vocal-Breaks & Drops"),
         ("hypnotic_groove", "Hypnotic Groove", "136–144 BPM | Modulare Polyrhythmen, 16-Takt-Loops, 32-Takt-Warnung"),
         ("hard_groove", "Hard Groove", "140–150 BPM | Tribal 909 Funk & Percussion Rolls"),
         ("bounce", "Bounce / Hard Bounce", "142–155 BPM | Offbeat-Basslines, Vocal Cuts & zackige Drops"),
