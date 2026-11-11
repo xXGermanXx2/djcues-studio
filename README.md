@@ -147,6 +147,11 @@ In fast-paced genres like **Industrial Techno, Hard Techno, Schranz, and Raw Gro
 
 Hier werden alle aktuellen und zukünftigen Neuerungen, Fehlerbehebungen und Optimierungen des Projekts dokumentiert.
 
+### [2026-11-11 (v8)] — Persistente Aktions-Schleife im Walkthrough
+- **🔁 Nahtlos mehrere Aktionen nacheinander ausführen:**
+  - Nach einer Aktion im Walkthrough (z. B. **Im Webbrowser visualisieren**) wirst du nicht mehr direkt ins Hauptmenü zurückgeworfen, sondern bleibst in deiner aktiven Auswahl (Genre, Hot Cues, Loops, Playlist).
+  - Du kannst direkt die nächste Aktion wählen (z. B. **Terminal-Vorschläge** -> **Review-Studio öffnen** -> **Review-Session in Rekordbox anwenden** mit automatischer Erkennung der gerade erstellten Session-Datei) oder gezielt einzelne Einstellungen ändern.
+
 ### [2026-11-11 (v7)] — Flexible Hot Cue Anzahl (4 / 8 / 12 / 16) & Loops An/Aus
 - **🔢 Auswahl der Hot Cue Anzahl (`--hot-cues 4|8|12|16`):**
   - **4 Hot Cues (Kompakt, Pads A–D):** Mappt automatisch die 4 wichtigsten Meilensteine (Start, Bassline/Rumble, Main Drop, Outro) auf die ersten 4 Pads.

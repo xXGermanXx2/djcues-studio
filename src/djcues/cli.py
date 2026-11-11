@@ -347,7 +347,9 @@ def _menu_cue_options(profile: dict, ask_tuning: bool = True) -> tuple[int, bool
 
 
 def _run_walkthrough_flow() -> None:
-    """Run the linear walkthrough: Rekordbox v6/v7 -> Genre -> Cues/Loops -> Playlist -> Tracks -> Action."""
+    """Run the interactive walkthrough with a persistent action loop."""
+    import pathlib
+
     click.clear()
     click.echo("=" * 65)
     click.echo("       djcues — Rekordbox Genre & Cue Walkthrough")
@@ -369,24 +371,77 @@ def _run_walkthrough_flow() -> None:
     click.echo("\n--- SCHRITT 3: PLAYLIST & TRACKS AUSWÄHLEN ---")
     playlist, track_name, all_tracks = _menu_scope()
 
-    # 4. Aktion
-    click.echo("\n--- SCHRITT 4: AKTION AUSWÄHLEN ---")
-    actions = [
-        "🌐  Im Webbrowser visualisieren (Waveform, Phrasen & Cue-Pads ansehen)",
-        "📋  Cue-Vorschläge im Terminal anzeigen (Propose / Details)",
-        "🎛️  Interaktives Review-Studio im Browser öffnen (Cues prüfen & anpassen)",
-        "⚖️  Bestehende Cues vergleichen (Compare Match-Rate)",
-    ]
-    action_idx = _menu_choice("Aktion auswählen", actions)
+    # 4. Persistent Action Loop (stay here so user can run multiple actions in a row)
+    while True:
+        loop_txt = f"{loop_bars} Takte" if use_loops else "Aus"
+        scope_txt = "Alle Tracks" if all_tracks else (track_name or "Auswahl")
+        click.echo("\n" + "=" * 65)
+        click.echo(f"  Aktiv: {profile['name']} | Playlist: {playlist} ({scope_txt})")
+        click.echo(f"  Cues: {max_hot_cues} Hot Cues | Loops: {loop_txt} | Offset: {offset} Takte")
+        click.echo("=" * 65)
 
-    if action_idx == 0:
-        viz.callback(playlist, track_name, all_tracks, False, offset, loop_bars, None, genre_key, max_hot_cues, use_loops)
-    elif action_idx == 1:
-        propose.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops)
-    elif action_idx == 2:
-        review.callback(playlist, track_name, all_tracks, offset, loop_bars, None, genre_key, max_hot_cues, use_loops)
-    elif action_idx == 3:
-        compare.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops)
+        actions = [
+            "🌐  Im Webbrowser visualisieren (Waveform, Phrasen & Cue-Pads ansehen)",
+            "📋  Cue-Vorschläge im Terminal anzeigen (Propose / Details)",
+            "🎛️  Interaktives Review-Studio im Browser öffnen (Cues prüfen & anpassen)",
+            "⚖️  Bestehende Cues vergleichen (Compare Match-Rate)",
+            "💾  Review-Session in Rekordbox anwenden (mit Backup-Abfrage)",
+            "⚙️  Einstellungen ändern (Genre / Hot Cues / Loops / Playlist)",
+            "🔙  Zurück zum Hauptmenü",
+        ]
+        action_idx = _menu_choice("Aktion auswählen", actions)
+
+        if action_idx == 6:
+            return
+        elif action_idx == 5:
+            sub_idx = _menu_choice(
+                "Was möchtest du ändern?",
+                [
+                    "Genre ändern",
+                    "Hot Cue Anzahl / Loops / Takte ändern",
+                    "Playlist / Tracks ändern",
+                    "Rekordbox Version (v6 / v7) wechseln",
+                ],
+            )
+            if sub_idx == 0:
+                genre_key, profile = _menu_genre()
+                offset = profile.get("default_memory_offset_bars", 16)
+                loop_bars = profile.get("default_loop_bars", 8)
+            elif sub_idx == 1:
+                max_hot_cues, use_loops, offset, loop_bars = _menu_cue_options(profile, ask_tuning=True)
+            elif sub_idx == 2:
+                playlist, track_name, all_tracks = _menu_scope()
+            elif sub_idx == 3:
+                _select_rekordbox_version(force_prompt=True)
+            continue
+
+        try:
+            if action_idx == 0:
+                viz.callback(playlist, track_name, all_tracks, False, offset, loop_bars, None, genre_key, max_hot_cues, use_loops)
+            elif action_idx == 1:
+                propose.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops)
+            elif action_idx == 2:
+                review.callback(playlist, track_name, all_tracks, offset, loop_bars, None, genre_key, max_hot_cues, use_loops)
+            elif action_idx == 3:
+                compare.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops)
+            elif action_idx == 4:
+                safe_name = "".join(c if c.isalnum() or c in " -_" else "" for c in playlist).strip().replace(" ", "-").lower()
+                default_session = pathlib.Path(f"{safe_name}-session.json")
+                if default_session.exists():
+                    session_file = click.prompt("Pfad zur Session-Datei", default=str(default_session), type=click.Path(exists=True, dir_okay=False))
+                else:
+                    session_file = click.prompt("Pfad zur Session-Datei", type=click.Path(exists=True, dir_okay=False))
+                dry_run = click.confirm("Nur testen (Dry Run)?", default=True)
+                force = False if dry_run else click.confirm("Vorhandene Cues ohne weitere Rückfrage überschreiben?", default=False)
+                apply.callback(session_file, dry_run, force, None)
+        except (click.ClickException, SystemExit) as exc:
+            if isinstance(exc, click.ClickException):
+                click.echo(f"Fehler: {exc}", err=True)
+            else:
+                click.echo("Der Vorgang konnte nicht abgeschlossen werden.", err=True)
+
+        click.echo()
+        click.pause("Enter drücken, um weitere Aktionen zu wählen")
 
 
 def _run_menu() -> None:
@@ -418,6 +473,7 @@ def _run_menu() -> None:
                 _select_rekordbox_version(force_prompt=True)
             elif choice == "1":
                 _run_walkthrough_flow()
+                continue
             elif choice == "5":
                 _select_rekordbox_version()
                 sub = _menu_choice(
