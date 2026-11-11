@@ -119,7 +119,7 @@ Waveforms and phrase structures are decoded directly from the ANLZ tag framing i
 
 ## Safety
 
-- **Auto-backup**: `djcues apply` automatically backs up `master.db` before writing
+- **Interactive Documents Backup**: Before applying any changes (`djcues apply`), you are always asked if you want to back up `master.db` (incl. `-wal`/`-shm` files) into **`Documents\rekordbox databse backup\<YYYY-MM-DD_HH-MM-SS>\`** (also available anytime via `djcues backup` or the menu)
 - **Overwrite protection**: Tracks with existing cues require explicit confirmation
 - **Rekordbox must be closed**: The apply command will not write while rekordbox is running
 - **Read-only by default**: `propose`, `compare`, `viz`, and `review` never modify the database
@@ -145,6 +145,12 @@ In fast-paced genres like **Industrial Techno, Hard Techno, Schranz, and Raw Gro
 ## Aktualisierungen & Changelog
 
 Hier werden alle aktuellen und zukünftigen Neuerungen, Fehlerbehebungen und Optimierungen des Projekts dokumentiert.
+
+### [2026-11-11 (v4)] — Interaktives Rekordbox-Backup in Dokumente
+- **🛡️ Interaktive Backup-Abfrage vor jeder DB-Änderung:**
+  - Bevor Änderungen über `djcues apply` oder das Menü in die Rekordbox-Datenbank geschrieben werden, wird nun automatisch gefragt, ob vorher ein Backup erstellt werden soll.
+  - Das Backup legt automatisch einen Ordner mit aktuellem Datum und Uhrzeit unter **`Dokumente\rekordbox databse backup\<JJJJ-MM-TT_HH-MM-SS>\`** an und sichert dort `master.db` (inkl. `-wal` & `-shm`-Dateien).
+  - Außerdem steht jederzeit ein direkter Backup-Befehl (`djcues backup` bzw. Menüpunkt 5) zur Verfügung.
 
 ### [2026-11-11 (v3)] — Eigenes Schranz-Profil & Kritischer Rekordbox Waveform-Fix (`PMAI`)
 - **⚡ Eigenes Profil: Schranz / Emotional Schranz (150–175 BPM):**

@@ -170,3 +170,66 @@ def test_build_cue_rows_handles_auto_status():
 
     # "auto" should be treated as accepted — all 8 memory rows present
     assert len(mem_rows) == 8
+
+
+def test_backup_database_to_documents(tmp_path):
+    from djcues.writer import backup_database_to_documents
+
+    db_dir = tmp_path / "rekordbox"
+    db_dir.mkdir()
+    fake_db = db_dir / "master.db"
+    fake_db.write_bytes(b"sqlite-real-content")
+    fake_wal = db_dir / "master.db-wal"
+    fake_wal.write_bytes(b"wal-data")
+
+    fake_docs = tmp_path / "Documents"
+    fake_docs.mkdir()
+
+    dest = backup_database_to_documents(fake_db, documents_dir=fake_docs)
+
+    assert dest.exists()
+    assert dest.name == "master.db"
+    assert dest.read_bytes() == b"sqlite-real-content"
+    assert dest.parent.parent == fake_docs / "rekordbox databse backup"
+    assert (dest.parent / "master.db-wal").read_bytes() == b"wal-data"
+
+
+def test_apply_session_asks_for_backup(tmp_path, monkeypatch):
+    import json
+    from unittest.mock import MagicMock
+    import click
+    import djcues.db
+    from djcues.writer import apply_session
+
+    # Setup fake DB dir & session file
+    db_dir = tmp_path / "db_dir"
+    db_dir.mkdir()
+    (db_dir / "master.db").write_bytes(b"db-bytes")
+
+    fake_docs = tmp_path / "MyDocs"
+    fake_docs.mkdir()
+    monkeypatch.setattr("djcues.writer.get_documents_dir", lambda: fake_docs)
+
+    mock_db = MagicMock()
+    mock_db.db_directory = db_dir
+    mock_db.get_cue.return_value = []
+    monkeypatch.setattr(djcues.db, "get_db", lambda: mock_db)
+
+    session_file = tmp_path / "session.json"
+    session_file.write_text(json.dumps({"tracks": {}}), encoding="utf-8")
+
+    # Case 1: User confirms backup ("y")
+    monkeypatch.setattr(click, "confirm", lambda *args, **kwargs: True)
+    apply_session(session_file, dry_run=False, force=True, backup=None)
+
+    backup_root = fake_docs / "rekordbox databse backup"
+    assert backup_root.exists()
+    subdirs = list(backup_root.iterdir())
+    assert len(subdirs) == 1
+    assert (subdirs[0] / "master.db").read_bytes() == b"db-bytes"
+
+    # Case 2: User declines backup ("n")
+    monkeypatch.setattr(click, "confirm", lambda *args, **kwargs: False)
+    apply_session(session_file, dry_run=False, force=True, backup=None)
+    # Still only 1 backup folder (no new backup created)
+    assert len(list(backup_root.iterdir())) == 1

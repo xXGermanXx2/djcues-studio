@@ -291,7 +291,7 @@ def _run_menu() -> None:
         click.echo("2) 📋 Cue-Vorschläge anzeigen (Propose)")
         click.echo("3) 🌐 Visualisierung im Browser öffnen (Viz)")
         click.echo("4) 🎛️  Cues im Browser prüfen/anpassen (Review Studio)")
-        click.echo("5) 💾 Review-Session anwenden")
+        click.echo("5) 💾 Review-Session anwenden / DB-Backup in Dokumente erstellen")
         click.echo("6) Beenden")
         click.echo()
 
@@ -304,10 +304,20 @@ def _run_menu() -> None:
             if choice == "1":
                 _run_walkthrough_flow()
             elif choice == "5":
-                session_file = click.prompt("Pfad zur Session-Datei", type=click.Path(exists=True, dir_okay=False))
-                dry_run = click.confirm("Nur testen (Dry Run)?", default=True)
-                force = False if dry_run else click.confirm("Vorhandene Cues ohne weitere Rückfrage überschreiben?", default=False)
-                apply.callback(session_file, dry_run, force)
+                sub = _menu_choice(
+                    "Datenbank-Aktion",
+                    [
+                        "Review-Session anwenden (fragt vorher nach Backup in Dokumente)",
+                        "Sofortiges Rekordbox Datenbank-Backup in Dokumente erstellen",
+                    ],
+                )
+                if sub == 1:
+                    backup.callback()
+                else:
+                    session_file = click.prompt("Pfad zur Session-Datei", type=click.Path(exists=True, dir_okay=False))
+                    dry_run = click.confirm("Nur testen (Dry Run)?", default=True)
+                    force = False if dry_run else click.confirm("Vorhandene Cues ohne weitere Rückfrage überschreiben?", default=False)
+                    apply.callback(session_file, dry_run, force, None)
             else:
                 # --- SCHRITT 1: Genre auswählen ---
                 genre_key, profile = _menu_genre()
@@ -485,14 +495,9 @@ def review(playlist, track_name, all_tracks, offset, loop_bars, output, genre="a
     selected = _get_tracks_for_scope(pl, track_name, all_tracks)
     strategy = CueStrategy(genre=genre, memory_offset_bars=offset, loop_length_bars=loop_bars)
     pairs = [(t, strategy.propose(t)) for t in selected]
-    for t in selected:
-        if t.phrases:
-            pairs.append((t, strategy.propose(t)))
-        else:
-            click.echo(f"  Skipping {t.title} (no phrase data)", err=True)
 
     if not pairs:
-        click.echo("No tracks with phrase data to review.", err=True)
+        click.echo("No tracks found to review.", err=True)
         raise SystemExit(1)
 
     # Generate session
@@ -555,10 +560,22 @@ def review(playlist, track_name, all_tracks, offset, loop_bars, output, genre="a
 
 
 @cli.command()
+def backup():
+    """Backup the rekordbox database to Documents/rekordbox databse backup/<date_time>."""
+    from djcues.writer import backup_database_to_documents
+
+    db = get_db()
+    db_path = db.db_directory / "master.db"
+    dest = backup_database_to_documents(db_path)
+    click.echo(f"Backup erfolgreich erstellt unter:\n  {dest.parent}")
+
+
+@cli.command()
 @click.argument("session_file", type=click.Path(exists=True))
 @click.option("--dry-run", is_flag=True, help="Show what would be written without making changes")
 @click.option("--force", is_flag=True, help="Skip overwrite confirmation")
-def apply(session_file, dry_run, force):
+@click.option("--backup/--no-backup", "do_backup", default=None, help="Backup DB to Documents before writing (asks by default)")
+def apply(session_file, dry_run, force, do_backup=None):
     """Apply a review session to the rekordbox database."""
     import pathlib
     from djcues.writer import apply_session
@@ -567,4 +584,5 @@ def apply(session_file, dry_run, force):
         session_path=pathlib.Path(session_file),
         dry_run=dry_run,
         force=force,
+        backup=do_backup,
     )

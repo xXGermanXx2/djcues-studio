@@ -5,10 +5,27 @@ from __future__ import annotations
 import json
 import pathlib
 import shutil
+import sys
 from datetime import datetime
 from uuid import uuid4
 
 from djcues.constants import CUE_SYSTEM, CUE_SYSTEM_BY_PAD
+
+
+def get_documents_dir() -> pathlib.Path:
+    """Return the user's Documents folder across Windows and Unix systems."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            buf = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+            # CSIDL_PERSONAL = 5 (My Documents)
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, buf) == 0 and buf.value:
+                return pathlib.Path(buf.value)
+        except Exception:
+            pass
+    return pathlib.Path.home() / "Documents"
 
 
 def _format_ms(ms: float) -> str:
@@ -20,13 +37,40 @@ def _format_ms(ms: float) -> str:
 
 
 def backup_database(db_path: pathlib.Path) -> pathlib.Path:
-    """Copy master.db to a timestamped backup. Returns the backup path."""
+    """Copy master.db to a timestamped backup next to the DB. Returns the backup path."""
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     stem = db_path.stem
     backup_name = f"{stem}-backup-{timestamp}.db"
     backup_path = db_path.parent / backup_name
     shutil.copy2(db_path, backup_path)
     return backup_path
+
+
+def backup_database_to_documents(
+    db_path: pathlib.Path,
+    documents_dir: pathlib.Path | None = None,
+) -> pathlib.Path:
+    """Create a timestamped backup folder inside '<Documents>/rekordbox databse backup'.
+
+    Copies master.db (and WAL/SHM companion files if present) into the timestamped folder.
+    Returns the backed-up master.db path.
+    """
+    docs = documents_dir if documents_dir is not None else get_documents_dir()
+    backup_root = docs / "rekordbox databse backup"
+    timestamp_folder = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    target_dir = backup_root / timestamp_folder
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    dest = target_dir / db_path.name
+    shutil.copy2(db_path, dest)
+
+    # Also copy SQLite companion files (-wal, -shm) if present for DB consistency
+    for suffix in ("-wal", "-shm"):
+        companion = pathlib.Path(f"{db_path}{suffix}")
+        if companion.exists():
+            shutil.copy2(companion, target_dir / companion.name)
+
+    return dest
 
 
 def build_cue_rows(
@@ -139,8 +183,8 @@ def write_cues_for_track(db, content, hot_rows, mem_rows, overwrite=False) -> in
     return count
 
 
-def apply_session(session_path, dry_run=False, force=False) -> dict:
-    """Read a session JSON file, show summary, back up DB, and write cues.
+def apply_session(session_path, dry_run=False, force=False, backup: bool | None = None) -> dict:
+    """Read a session JSON file, show summary, optionally back up DB to Documents, and write cues.
 
     One commit per track. Returns a summary dict.
     """
@@ -193,8 +237,20 @@ def apply_session(session_path, dry_run=False, force=False) -> dict:
         return result
 
     db = get_db()
-    backup_path = backup_database(db.db_directory / "master.db")
-    click.echo(f"Backup: {backup_path}")
+    if backup is None:
+        docs_backup_root = get_documents_dir() / "rekordbox databse backup"
+        do_backup = click.confirm(
+            f"Möchtest du vorher ein Backup der Rekordbox-Datenbank in '{docs_backup_root}' (Ordner mit Datum & Uhrzeit) erstellen?",
+            default=True,
+        )
+    else:
+        do_backup = backup
+
+    if do_backup:
+        backup_path = backup_database_to_documents(db.db_directory / "master.db")
+        click.echo(f"Backup gespeichert in: {backup_path}")
+    else:
+        click.echo("Backup übersprungen — fahre ohne Backup fort.")
 
     written = 0
     cues_written = 0
