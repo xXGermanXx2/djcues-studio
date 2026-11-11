@@ -53,9 +53,12 @@ To customize the cue system, edit `cue-system.csv` and update the `CUE_SYSTEM` d
 Start `djcues` without a subcommand to open the guided terminal menu. It lets you choose proposal, comparison, visualization, browser review, and session apply without typing the full command. For the playlist-based actions, the menu then walks through **action → playlist → all tracks or one track → memory offset → loop length** with numbered choices. The explicit menu command is also available:
 
 ```bash
-uv run djcues
-# or
-uv run djcues menu
+# Windows (empfohlen über djcues.bat / bestehende .venv):
+djcues apply <session.json>
+# oder Menü / Walkthrough öffnen:
+djcues menu
+# Alternative ohne Wrapper:
+.\.venv\Scripts\python.exe -m djcues.cli menu
 ```
 
 Use option **6** to exit the menu. The original command-line interface remains available for scripted use.
@@ -146,6 +149,10 @@ In fast-paced genres like **Industrial Techno, Hard Techno, Schranz, and Raw Gro
 ## Aktualisierungen & Changelog
 
 Hier werden alle aktuellen und zukünftigen Neuerungen, Fehlerbehebungen und Optimierungen des Projekts dokumentiert.
+
+### [2026-11-11 (v11)] — Fix für `.venv`-Konflikt unter Windows (`uv run` / `.python-version`)
+- **🔧 Fix in [`format_apply_command`](src/djcues/review.py):** Das Review-Studio schlägt unter Windows jetzt **vorrangig die aktive `.venv`** (`.\.venv\Scripts\python.exe -m djcues.cli apply "..."`) vor statt `uv run`, selbst wenn `uv` im System installiert ist. Dadurch versucht `uv` nicht mehr, eine laufende `.venv` zu löschen oder downzugraden (`Zugriff verweigert / os error 5`).
+- **🐍 `.python-version` entfernt:** Verhindert, dass `uv` bei bestehender Python-3.12-`.venv` (über `INSTALL_DEPENDENCIES.bat`) auf `CPython 3.10` zurückwechseln und `.venv\Lib` überschreiben will (`requires-python = ">=3.10"` gilt weiterhin über `pyproject.toml`).
 
 ### [2026-11-11 (v10)] — Auswahl für vorhandene Cues im Walkthrough (Überschreiben vs. Behalten)
 - **🛡️ Schutz & Auswahl für vorhandene Hot/Memory Cues (`--existing ask|overwrite|skip`):**

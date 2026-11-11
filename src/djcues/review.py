@@ -17,10 +17,12 @@ def format_apply_command(session_path: str) -> str:
     import shutil
     import sys
 
-    if shutil.which("uv"):
-        return f'uv run djcues apply "{session_path}"'
     if sys.platform == "win32" and pathlib.Path(".venv/Scripts/python.exe").exists():
         return f'.\\.venv\\Scripts\\python.exe -m djcues.cli apply "{session_path}"'
+    if sys.prefix != getattr(sys, "base_prefix", sys.prefix):
+        return f'"{sys.executable}" -m djcues.cli apply "{session_path}"'
+    if shutil.which("uv"):
+        return f'uv run djcues apply "{session_path}"'
     return f'"{sys.executable}" -m djcues.cli apply "{session_path}"'
 
 

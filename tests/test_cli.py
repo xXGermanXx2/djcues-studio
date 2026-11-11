@@ -37,6 +37,22 @@ def test_format_apply_command_without_uv(monkeypatch):
     assert "my-session.json" in cmd
 
 
+def test_format_apply_command_prefers_venv_even_with_uv(monkeypatch, tmp_path):
+    import shutil
+    import sys
+    from djcues.review import format_apply_command
+
+    if sys.platform == "win32":
+        venv_py = tmp_path / ".venv" / "Scripts" / "python.exe"
+        venv_py.parent.mkdir(parents=True)
+        venv_py.write_bytes(b"")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(shutil, "which", lambda cmd: "C:\\bin\\uv.exe")
+        cmd = format_apply_command("my-session.json")
+        assert "uv run" not in cmd
+        assert ".venv\\Scripts\\python.exe -m djcues.cli apply" in cmd
+
+
 def test_menu_existing_cues_policy(monkeypatch):
     import click
     from djcues.cli import _menu_existing_cues_policy
