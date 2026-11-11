@@ -586,3 +586,7 @@ def apply(session_file, dry_run, force, do_backup=None):
         force=force,
         backup=do_backup,
     )
+
+
+if __name__ == "__main__":
+    cli()
