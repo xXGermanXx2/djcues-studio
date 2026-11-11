@@ -189,7 +189,13 @@ def write_cues_for_track(db, content, hot_rows, mem_rows, overwrite=False) -> in
     return count
 
 
-def apply_session(session_path, dry_run=False, force=False, backup: bool | None = None) -> dict:
+def apply_session(
+    session_path,
+    dry_run=False,
+    force=False,
+    backup: bool | None = None,
+    existing_cues: str = "ask",
+) -> dict:
     """Read a session JSON file, show summary, optionally back up DB to Documents, and write cues.
 
     One commit per track. Returns a summary dict.
@@ -271,10 +277,14 @@ def apply_session(session_path, dry_run=False, force=False, backup: bool | None 
         if existing:
             tracks_with_existing[track_id] = existing
 
-    if tracks_with_existing and not force:
+    policy = "overwrite" if (force and existing_cues == "ask") else existing_cues
+    if policy not in ("ask", "overwrite", "skip"):
+        raise ValueError(f"Invalid existing_cues policy: {policy}")
+
+    if tracks_with_existing and policy == "ask":
         from djcues.constants import KIND_TO_PAD
 
-        click.echo(f"\n{len(tracks_with_existing)} track(s) have existing cues that will be replaced:\n")
+        click.echo(f"\n{len(tracks_with_existing)} track(s) have existing cues:\n")
         for track_id, existing in tracks_with_existing.items():
             track_data = tracks[track_id]
             title = track_data.get("title", track_id)
@@ -300,11 +310,35 @@ def apply_session(session_path, dry_run=False, force=False, backup: bool | None 
                 click.echo(f"      [{pad}] {label:20s} {_format_ms(d['position_ms'])}")
             click.echo()
 
-        click.confirm("Continue?", abort=True)
+        click.echo("Wie soll mit Tracks verfahren werden, die bereits Cues in Rekordbox haben?")
+        click.echo("  [1] Vorhandene Cues überschreiben")
+        click.echo("  [2] Vorhandene Cues behalten (Tracks mit Cues überspringen)")
+        click.echo("  [3] Abbrechen")
+        action_choice = click.prompt(
+            "Auswahl",
+            type=click.Choice(["1", "2", "3"]),
+            default="2",
+            show_choices=False,
+        )
+        if action_choice == "3":
+            raise click.Abort()
+        policy = "overwrite" if action_choice == "1" else "skip"
+    elif tracks_with_existing and policy == "skip":
+        click.echo(
+            f"\n{len(tracks_with_existing)} Track(s) mit vorhandenen Cues werden übersprungen (vorhandene Cues bleiben erhalten)."
+        )
 
+    skipped_existing = 0
     for track_id, track_data in tracks.items():
         status = track_data.get("status", "")
         if status not in ("accepted", "adjusted"):
+            continue
+
+        has_existing = track_id in tracks_with_existing
+        if has_existing and policy == "skip":
+            title = track_data.get("title", f"ID {track_id}")
+            click.echo(f"  Übersprungen (vorhandene Cues behalten): {title}")
+            skipped_existing += 1
             continue
 
         hot_cues_data = track_data.get("cues", {})
@@ -312,7 +346,7 @@ def apply_session(session_path, dry_run=False, force=False, backup: bool | None 
         hot_rows, mem_rows = build_cue_rows(hot_cues_data, mem_cues_data)
 
         content = db.get_content(ID=int(track_id))
-        overwrite = track_id in tracks_with_existing.keys()
+        overwrite = has_existing
         count = write_cues_for_track(db, content, hot_rows, mem_rows, overwrite=overwrite)
         db.commit()
 
@@ -323,5 +357,9 @@ def apply_session(session_path, dry_run=False, force=False, backup: bool | None 
 
     result["written"] = written
     result["cues_written"] = cues_written
-    click.echo(f"Done: {written} tracks, {cues_written} cues written.")
+    result["skipped_existing"] = skipped_existing
+    click.echo(
+        f"Done: {written} tracks, {cues_written} cues written"
+        + (f", {skipped_existing} skipped (existing cues kept)." if skipped_existing else ".")
+    )
     return result

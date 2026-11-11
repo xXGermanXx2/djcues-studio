@@ -147,6 +147,14 @@ In fast-paced genres like **Industrial Techno, Hard Techno, Schranz, and Raw Gro
 
 Hier werden alle aktuellen und zukünftigen Neuerungen, Fehlerbehebungen und Optimierungen des Projekts dokumentiert.
 
+### [2026-11-11 (v10)] — Auswahl für vorhandene Cues im Walkthrough (Überschreiben vs. Behalten)
+- **🛡️ Schutz & Auswahl für vorhandene Hot/Memory Cues (`--existing ask|overwrite|skip`):**
+  - Direkt im Walkthrough (Schritt 2 sowie jederzeit über *Einstellungen ändern* und beim Anwenden) kannst du festlegen, wie mit Tracks verfahren wird, die bereits Hot Cues oder Memory Cues in Rekordbox besitzen:
+    1. **Nein — vorhandene Cues behalten (Tracks mit Cues überspringen):** Schützt bestehende Cues zuverlässig und schreibt nur auf Tracks ohne vorhandene Cues.
+    2. **Ja — vorhandene Cues überschreiben:** Ersetzt alte Cues durch die neuen generierten Cues.
+    3. **Jedes Mal beim Anwenden nachfragen:** Zeigt die Track-Liste mit vorhandenen vs. neuen Cues und fragt gezielt nach (**[1] Überschreiben**, **[2] Behalten/Überspringen**, **[3] Abbrechen**).
+  - Auch direkt per CLI nutzbar: `djcues apply <session.json> --existing skip|overwrite|ask`.
+
 ### [2026-11-11 (v9)] — Auto-Backup Loop am Trackende (Rekordbox Active Loop)
 - **🛡️ Auto-Loop am Ende als Backup (`--auto-end-loop`):**
   - Neue Option direkt im Walkthrough-Menü (unter *Hot Cue & Loop Einstellungen* sowie jederzeit im Einstellungs-Untermenü änderbar): **„Auto-Loop am Ende als Backup (Active Loop)“**.

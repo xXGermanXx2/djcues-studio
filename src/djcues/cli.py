@@ -357,6 +357,26 @@ def _menu_cue_options(profile: dict, ask_tuning: bool = True) -> tuple[int, bool
     return max_hot_cues, use_loops, auto_end_loop, offset, loop_bars
 
 
+_EXISTING_POLICY_LABELS = {
+    "skip": "Behalten (Skip)",
+    "overwrite": "Überschreiben",
+    "ask": "Nachfragen",
+}
+
+
+def _menu_existing_cues_policy() -> str:
+    """Ask user whether existing Hot/Memory cues in Rekordbox may be overwritten."""
+    idx = _menu_choice(
+        "Dürfen vorhandene Hot Cues / Memory Cues überschrieben werden?",
+        [
+            "Nein — vorhandene Cues behalten (Tracks mit Cues überspringen)",
+            "Ja — vorhandene Cues überschreiben (alte Cues ersetzen)",
+            "Jedes Mal beim Anwenden nachfragen (Track-Liste prüfen & entscheiden)",
+        ],
+    )
+    return ["skip", "overwrite", "ask"][idx]
+
+
 def _run_walkthrough_flow() -> None:
     """Run the interactive walkthrough with a persistent action loop."""
     import pathlib
@@ -373,11 +393,15 @@ def _run_walkthrough_flow() -> None:
     genre_key, profile = _menu_genre()
     click.echo(f"\n[Aktiviert] Genre: {profile['name']} ({profile['bpm_range']})")
 
-    # 2. Hot Cue Count, Loops & Auto-End-Loop
+    # 2. Hot Cue Count, Loops, Auto-End-Loop & Overwrite Policy
     max_hot_cues, use_loops, auto_end_loop, offset, loop_bars = _menu_cue_options(profile, ask_tuning=False)
+    existing_policy = _menu_existing_cues_policy()
     loop_txt = f"{loop_bars} Takte" if use_loops else "Aus"
     auto_txt = f"Aktiv ({loop_bars} Takte)" if auto_end_loop else "Aus"
-    click.echo(f"  • Hot Cues: {max_hot_cues} | Loops: {loop_txt} | Auto-End-Loop: {auto_txt} | Offset: {offset} Takte")
+    click.echo(
+        f"  • Hot Cues: {max_hot_cues} | Loops: {loop_txt} | Auto-End-Loop: {auto_txt} "
+        f"| Offset: {offset} Takte | Vorhandene Cues: {_EXISTING_POLICY_LABELS[existing_policy]}"
+    )
 
     # 3. Playlist & Tracks
     click.echo("\n--- SCHRITT 3: PLAYLIST & TRACKS AUSWÄHLEN ---")
@@ -390,7 +414,10 @@ def _run_walkthrough_flow() -> None:
         scope_txt = "Alle Tracks" if all_tracks else (track_name or "Auswahl")
         click.echo("\n" + "=" * 65)
         click.echo(f"  Aktiv: {profile['name']} | Playlist: {playlist} ({scope_txt})")
-        click.echo(f"  Cues: {max_hot_cues} | Loops: {loop_txt} | Auto-End-Loop: {auto_txt} | Offset: {offset} Takte")
+        click.echo(
+            f"  Cues: {max_hot_cues} | Loops: {loop_txt} | Auto-End-Loop: {auto_txt} "
+            f"| Vorhandene: {_EXISTING_POLICY_LABELS[existing_policy]}"
+        )
         click.echo("=" * 65)
 
         actions = [
@@ -399,7 +426,7 @@ def _run_walkthrough_flow() -> None:
             "🎛️  Interaktives Review-Studio im Browser öffnen (Cues prüfen & anpassen)",
             "⚖️  Bestehende Cues vergleichen (Compare Match-Rate)",
             "💾  Review-Session in Rekordbox anwenden (mit Backup-Abfrage)",
-            "⚙️  Einstellungen ändern (Genre / Hot Cues / Loops / Auto-End-Loop / Playlist)",
+            "⚙️  Einstellungen ändern (Genre / Hot Cues / Loops / Überschreiben / Playlist)",
             "🔙  Zurück zum Hauptmenü",
         ]
         action_idx = _menu_choice("Aktion auswählen", actions)
@@ -412,6 +439,7 @@ def _run_walkthrough_flow() -> None:
                 [
                     "Genre ändern",
                     "Hot Cue Anzahl / Loops / Auto-End-Loop / Takte ändern",
+                    "Umgang mit vorhandenen Cues ändern (Überschreiben / Behalten / Nachfragen)",
                     "Playlist / Tracks ändern",
                     "Rekordbox Version (v6 / v7) wechseln",
                 ],
@@ -423,8 +451,10 @@ def _run_walkthrough_flow() -> None:
             elif sub_idx == 1:
                 max_hot_cues, use_loops, auto_end_loop, offset, loop_bars = _menu_cue_options(profile, ask_tuning=True)
             elif sub_idx == 2:
-                playlist, track_name, all_tracks = _menu_scope()
+                existing_policy = _menu_existing_cues_policy()
             elif sub_idx == 3:
+                playlist, track_name, all_tracks = _menu_scope()
+            elif sub_idx == 4:
                 _select_rekordbox_version(force_prompt=True)
             continue
 
@@ -445,8 +475,12 @@ def _run_walkthrough_flow() -> None:
                 else:
                     session_file = click.prompt("Pfad zur Session-Datei", type=click.Path(exists=True, dir_okay=False))
                 dry_run = click.confirm("Nur testen (Dry Run)?", default=True)
-                force = False if dry_run else click.confirm("Vorhandene Cues ohne weitere Rückfrage überschreiben?", default=False)
-                apply.callback(session_file, dry_run, force, None)
+                apply_policy = existing_policy
+                if not dry_run:
+                    click.echo(f"Aktuelle Einstellung für vorhandene Cues: {_EXISTING_POLICY_LABELS[apply_policy]}")
+                    if not click.confirm("Diese Einstellung verwenden?", default=True):
+                        apply_policy = _menu_existing_cues_policy()
+                apply.callback(session_file, dry_run, False, None, apply_policy)
         except (click.ClickException, SystemExit) as exc:
             if isinstance(exc, click.ClickException):
                 click.echo(f"Fehler: {exc}", err=True)
@@ -501,8 +535,8 @@ def _run_menu() -> None:
                 else:
                     session_file = click.prompt("Pfad zur Session-Datei", type=click.Path(exists=True, dir_okay=False))
                     dry_run = click.confirm("Nur testen (Dry Run)?", default=True)
-                    force = False if dry_run else click.confirm("Vorhandene Cues ohne weitere Rückfrage überschreiben?", default=False)
-                    apply.callback(session_file, dry_run, force, None)
+                    apply_policy = "ask" if dry_run else _menu_existing_cues_policy()
+                    apply.callback(session_file, dry_run, False, None, apply_policy)
             else:
                 _select_rekordbox_version()
                 # --- SCHRITT 1: Genre auswählen ---
@@ -804,9 +838,17 @@ def backup():
 @cli.command()
 @click.argument("session_file", type=click.Path(exists=True))
 @click.option("--dry-run", is_flag=True, help="Show what would be written without making changes")
-@click.option("--force", is_flag=True, help="Skip overwrite confirmation")
+@click.option("--force", is_flag=True, help="Skip overwrite confirmation (alias for --existing overwrite)")
 @click.option("--backup/--no-backup", "do_backup", default=None, help="Backup DB to Documents before writing (asks by default)")
-def apply(session_file, dry_run, force, do_backup=None):
+@click.option(
+    "--existing",
+    "existing_cues",
+    type=click.Choice(["ask", "overwrite", "skip"], case_sensitive=False),
+    default="ask",
+    show_default=True,
+    help="How to handle tracks that already have cues in Rekordbox (ask, overwrite, or skip).",
+)
+def apply(session_file, dry_run, force, do_backup=None, existing_cues="ask"):
     """Apply a review session to the rekordbox database."""
     import pathlib
     from djcues.writer import apply_session
@@ -816,6 +858,7 @@ def apply(session_file, dry_run, force, do_backup=None):
         dry_run=dry_run,
         force=force,
         backup=do_backup,
+        existing_cues=existing_cues.lower(),
     )
 
 

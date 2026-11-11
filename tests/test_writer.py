@@ -276,3 +276,80 @@ def test_build_cue_rows_sets_active_loop_1():
     assert row["ActiveLoop"] == 1
     assert row["Color"] == 5
     assert row["Comment"] == "Auto-Backup Loop (Active)"
+
+
+def _make_two_track_session(tmp_path):
+    import json
+
+    session_file = tmp_path / "session.json"
+    session_data = {
+        "tracks": {
+            "101": {
+                "title": "Existing Track",
+                "status": "accepted",
+                "cues": {"A": {"status": "accepted", "position_ms": 1000.0, "loop_end_ms": None}},
+                "memory_cues": {},
+            },
+            "102": {
+                "title": "Clean Track",
+                "status": "accepted",
+                "cues": {"A": {"status": "accepted", "position_ms": 2000.0, "loop_end_ms": None}},
+                "memory_cues": {},
+            },
+        }
+    }
+    session_file.write_text(json.dumps(session_data), encoding="utf-8")
+    return session_file
+
+
+def test_apply_session_existing_cues_policies(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+    import click
+    import djcues.db
+    from djcues.writer import apply_session
+
+    session_file = _make_two_track_session(tmp_path)
+
+    existing_cue = SimpleNamespace(Kind=1, Comment="Old Cue", InMsec=500)
+    mock_db = MagicMock()
+    mock_db.db_directory = tmp_path
+    mock_db.get_cue.side_effect = lambda ContentID: [existing_cue] if ContentID == 101 else []
+    mock_db.get_content.side_effect = lambda ID: SimpleNamespace(ID=ID, Title=f"Track {ID}")
+    monkeypatch.setattr(djcues.db, "get_db", lambda: mock_db)
+
+    calls = []
+
+    def fake_write(db, content, hot_rows, mem_rows, overwrite=False):
+        calls.append((content.ID, overwrite))
+        return len(hot_rows) + len(mem_rows)
+
+    monkeypatch.setattr("djcues.writer.write_cues_for_track", fake_write)
+
+    # 1. Policy "skip": skips track 101, writes only track 102
+    res_skip = apply_session(session_file, dry_run=False, backup=False, existing_cues="skip")
+    assert res_skip["written"] == 1
+    assert res_skip["skipped_existing"] == 1
+    assert calls == [(102, False)]
+
+    # 2. Policy "overwrite": overwrites track 101 and writes track 102
+    calls.clear()
+    res_overwrite = apply_session(session_file, dry_run=False, backup=False, existing_cues="overwrite")
+    assert res_overwrite["written"] == 2
+    assert res_overwrite["skipped_existing"] == 0
+    assert calls == [(101, True), (102, False)]
+
+    # 3. Policy "ask" with choice "2" (keep/skip existing) and choice "1" (overwrite)
+    calls.clear()
+    monkeypatch.setattr(click, "prompt", lambda *args, **kwargs: "2")
+    res_ask_skip = apply_session(session_file, dry_run=False, backup=False, existing_cues="ask")
+    assert res_ask_skip["written"] == 1
+    assert res_ask_skip["skipped_existing"] == 1
+    assert calls == [(102, False)]
+
+    calls.clear()
+    monkeypatch.setattr(click, "prompt", lambda *args, **kwargs: "1")
+    res_ask_overwrite = apply_session(session_file, dry_run=False, backup=False, existing_cues="ask")
+    assert res_ask_overwrite["written"] == 2
+    assert res_ask_overwrite["skipped_existing"] == 0
+    assert calls == [(101, True), (102, False)]
