@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import pathlib
+import sys
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from typing import Any
+
+import pyrekordbox
 
 try:
     from pyrekordbox.masterdb import MasterDatabase as RekordboxDatabase
@@ -15,14 +23,246 @@ from djcues.models import BeatGrid, CuePoint, Phrase, Track, WaveformPoint
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class RekordboxInstallation:
+    """Represents a detected Rekordbox 6 or 7 installation/database."""
+
+    version_major: int  # 6 or 7
+    version_str: str
+    db_path: pathlib.Path
+    install_dir: pathlib.Path | None = None
+
+
 _db: RekordboxDatabase | None = None
+_selected_db_path: pathlib.Path | None = None
+_selected_version: int | None = None
+_active_info: RekordboxInstallation | None = None
+
+
+def _parse_settings_db_dir(settings_file: pathlib.Path) -> pathlib.Path | None:
+    """Extract masterDbDirectory from Rekordbox's rekordbox3.settings XML."""
+    if not settings_file.exists():
+        return None
+    try:
+        tree = ET.parse(settings_file)
+        for elem in tree.getroot().iter("VALUE"):
+            if elem.attrib.get("name") == "masterDbDirectory":
+                val = elem.attrib.get("val", "").strip()
+                if val:
+                    return pathlib.Path(val)
+    except Exception:
+        pass
+    return None
+
+
+def _find_program_installs() -> dict[int, tuple[str, pathlib.Path]]:
+    """Scan standard and custom drives on Windows/macOS for Rekordbox 6 & 7 installs."""
+    found: dict[int, tuple[str, pathlib.Path]] = {}
+    candidates: list[pathlib.Path] = []
+
+    if sys.platform == "win32":
+        roots: list[pathlib.Path] = []
+        for env_key in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"):
+            val = os.environ.get(env_key)
+            if val:
+                roots.append(pathlib.Path(val.replace(" (x86)", "")))
+        # Also scan common drives in case Rekordbox was installed on D:, E:, K:, etc.
+        for drive in ("C:", "D:", "E:", "F:", "G:", "K:"):
+            pf = pathlib.Path(f"{drive}/Program Files")
+            if pf.exists() and pf not in roots:
+                roots.append(pf)
+
+        for r in roots:
+            pioneer_dir = r / "Pioneer"
+            if pioneer_dir.exists():
+                candidates.extend(pioneer_dir.glob("rekordbox 6*"))
+                candidates.extend(pioneer_dir.glob("rekordbox 7*"))
+            rb_dir = r / "rekordbox"
+            if rb_dir.exists():
+                candidates.extend(rb_dir.glob("rekordbox 7*"))
+                candidates.extend(rb_dir.glob("rekordbox 6*"))
+    elif sys.platform == "darwin":
+        apps = pathlib.Path("/Applications")
+        if apps.exists():
+            candidates.extend(apps.glob("rekordbox 6*"))
+            candidates.extend(apps.glob("rekordbox 7*"))
+
+    for c in candidates:
+        name_lower = c.name.lower()
+        ver = c.name.replace("rekordbox", "").replace(".app", "").strip()
+        if ver.startswith("7") or " 7" in name_lower:
+            found[7] = (ver or "7.x", c)
+        elif ver.startswith("6") or " 6" in name_lower:
+            found[6] = (ver or "6.x", c)
+
+    return found
+
+
+def detect_rekordbox_configs() -> list[RekordboxInstallation]:
+    """Detect all available Rekordbox 6 and 7 installations and master.db files.
+
+    Works even when pyrekordbox's built-in ProgramFiles scan fails (e.g. custom
+    install drives, mismatched ProgramFiles(x86), or standalone DB folders).
+    """
+    installs: list[RekordboxInstallation] = []
+    seen_keys: set[tuple[int, str]] = set()
+
+    def _add(ver_major: int, ver_str: str, db_path: pathlib.Path, install_dir: pathlib.Path | None = None) -> None:
+        if not db_path.exists() or not db_path.is_file():
+            return
+        norm = str(db_path.resolve()).lower() if sys.platform == "win32" else str(db_path.resolve())
+        key = (ver_major, norm)
+        if key not in seen_keys:
+            seen_keys.add(key)
+            installs.append(RekordboxInstallation(
+                version_major=ver_major,
+                version_str=ver_str,
+                db_path=db_path,
+                install_dir=install_dir,
+            ))
+
+    # 1. Check pyrekordbox's built-in config first
+    for ver_major, cfg_name in ((7, "rekordbox7"), (6, "rekordbox6")):
+        try:
+            cfg = pyrekordbox.get_config(cfg_name)
+            if cfg and cfg.get("db_path"):
+                _add(
+                    ver_major,
+                    str(cfg.get("version") or f"{ver_major}.x"),
+                    pathlib.Path(cfg["db_path"]),
+                    pathlib.Path(cfg["install_dir"]) if cfg.get("install_dir") else None,
+                )
+        except Exception:
+            pass
+
+    # 2. Scan Pioneer app data & custom install drives
+    app_roots: list[pathlib.Path] = []
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            app_roots.append(pathlib.Path(appdata) / "Pioneer")
+    app_roots.append(pathlib.Path.home() / "Library/Pioneer")
+
+    prog_installs = _find_program_installs()
+
+    # Check options.json and rekordbox3.settings
+    discovered_dbs: list[pathlib.Path] = []
+    opts_ver: str = ""
+    for root in app_roots:
+        if not root.exists():
+            continue
+        opt_file = root / "rekordboxAgent/storage/options.json"
+        if opt_file.exists():
+            try:
+                data = json.loads(opt_file.read_text(encoding="utf-8"))
+                for pair in data.get("options", []):
+                    if len(pair) == 2 and pair[0] == "db-path":
+                        discovered_dbs.append(pathlib.Path(pair[1]))
+                    elif len(pair) == 2 and pair[0] == "app_ver":
+                        opts_ver = str(pair[1])
+            except Exception:
+                pass
+        for sub in ("rekordbox7", "rekordbox6", "rekordbox"):
+            s_dir = _parse_settings_db_dir(root / sub / "rekordbox3.settings")
+            if s_dir:
+                discovered_dbs.append(s_dir / "master.db")
+            direct_db = root / sub / "master.db"
+            if direct_db.exists():
+                discovered_dbs.append(direct_db)
+
+    valid_dbs = [p for p in discovered_dbs if p.exists() and p.is_file()]
+    fallback_db = valid_dbs[0] if valid_dbs else None
+
+    # Register detected program installations paired with valid DBs
+    for ver_major in (7, 6):
+        if ver_major in prog_installs and fallback_db is not None:
+            ver_str, inst_dir = prog_installs[ver_major]
+            _add(ver_major, ver_str, fallback_db, inst_dir)
+
+    # If no Program Files folder was found at all, still register any valid master.db found
+    if not installs and fallback_db is not None:
+        inferred_ver = 7 if opts_ver.startswith("7") else 6
+        _add(inferred_ver, opts_ver or f"{inferred_ver}.x (DB)", fallback_db, None)
+
+    installs.sort(key=lambda i: (-i.version_major, i.version_str))
+    return installs
+
+
+def get_active_db_info() -> RekordboxInstallation | None:
+    """Return metadata about the currently active Rekordbox DB connection."""
+    return _active_info
+
+
+def configure_db(
+    version: int | None = None,
+    db_path: str | pathlib.Path | None = None,
+) -> RekordboxDatabase:
+    """Explicitly select Rekordbox v6, v7, or a custom master.db path."""
+    global _db, _selected_db_path, _selected_version, _active_info
+
+    if _db is not None:
+        try:
+            _db.close()
+        except Exception:
+            pass
+        _db = None
+
+    _active_info = None
+    _selected_version = version
+
+    if db_path is not None:
+        p = pathlib.Path(str(db_path).strip().strip('"').strip("'"))
+        if p.is_dir():
+            p = p / "master.db"
+        if not p.exists():
+            raise FileNotFoundError(f"Rekordbox Datenbank nicht gefunden: '{p}'")
+        _selected_db_path = p
+    else:
+        _selected_db_path = None
+
+    return get_db()
 
 
 def get_db() -> RekordboxDatabase:
     """Get or create the shared database connection."""
-    global _db
-    if _db is None:
-        _db = RekordboxDatabase()
+    global _db, _active_info
+    if _db is not None:
+        return _db
+
+    if _selected_db_path is not None:
+        _db = RekordboxDatabase(path=_selected_db_path, db_dir=_selected_db_path.parent)
+        ver = _selected_version or 7
+        _active_info = RekordboxInstallation(
+            version_major=ver,
+            version_str=f"Custom (v{ver})",
+            db_path=_selected_db_path,
+        )
+        return _db
+
+    configs = detect_rekordbox_configs()
+    if _selected_version is not None:
+        matched = [c for c in configs if c.version_major == _selected_version]
+        if matched:
+            cfg = matched[0]
+            _db = RekordboxDatabase(path=cfg.db_path, db_dir=cfg.db_path.parent)
+            _active_info = cfg
+            return _db
+        if configs:
+            cfg = configs[0]
+            logger.warning("Rekordbox v%s not found; using v%s instead.", _selected_version, cfg.version_major)
+            _db = RekordboxDatabase(path=cfg.db_path, db_dir=cfg.db_path.parent)
+            _active_info = cfg
+            return _db
+
+    if configs:
+        cfg = configs[0]
+        _db = RekordboxDatabase(path=cfg.db_path, db_dir=cfg.db_path.parent)
+        _active_info = cfg
+        return _db
+
+    # Final fallback to pyrekordbox default (also supports mocked MasterDatabase in tests)
+    _db = RekordboxDatabase()
     return _db
 
 

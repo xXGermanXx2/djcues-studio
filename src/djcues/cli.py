@@ -21,8 +21,18 @@ for _name in ("pyrekordbox", "pyrekordbox.db6", "pyrekordbox.anlz", "pyrekordbox
 warnings.filterwarnings("ignore", module="pyrekordbox")
 
 from djcues.constants import CUE_SYSTEM_BY_PAD, KIND_TO_PAD, GENRE_PROFILES, get_genre_profile
-from djcues.db import find_playlist, get_db, load_playlist_tracks, load_track
+from djcues.db import (
+    configure_db,
+    detect_rekordbox_configs,
+    find_playlist,
+    get_active_db_info,
+    get_db,
+    load_playlist_tracks,
+    load_track,
+)
 from djcues.strategy import CueStrategy
+
+_rb_session_selected: bool = False
 
 
 def _format_time(ms: float) -> str:
@@ -240,12 +250,73 @@ def _menu_genre() -> tuple[str, dict]:
     return key, profile
 
 
+def _select_rekordbox_version(force_prompt: bool = False) -> None:
+    """Detect Rekordbox 6 & 7 and let the user choose which version or DB path to use."""
+    global _rb_session_selected
+    if _rb_session_selected and not force_prompt:
+        return
+
+    configs = detect_rekordbox_configs()
+
+    if not configs:
+        click.echo("\n[HINWEIS] Es wurde kein Rekordbox v6/v7 Verzeichnis automatisch gefunden.")
+        ver_idx = _menu_choice(
+            "Rekordbox Version manuell wählen",
+            [
+                "Rekordbox 7 (Pfad zu master.db angeben)",
+                "Rekordbox 6 (Pfad zu master.db angeben)",
+            ],
+        )
+        ver = 7 if ver_idx == 0 else 6
+        custom_path = click.prompt("Pfad zur Rekordbox master.db (Datei reinziehen oder Pfad eingeben)")
+        try:
+            configure_db(version=ver, db_path=custom_path)
+            _rb_session_selected = True
+            click.echo(f"[OK] Verbunden mit Rekordbox {ver} Datenbank.")
+        except Exception as exc:
+            raise click.ClickException(f"Datenbank konnte nicht geöffnet werden: {exc}")
+        return
+
+    if len(configs) == 1 and not force_prompt:
+        cfg = configs[0]
+        configure_db(version=cfg.version_major, db_path=cfg.db_path)
+        _rb_session_selected = True
+        click.echo(f"[Rekordbox erkannt] Rekordbox {cfg.version_major} (v{cfg.version_str}) — {cfg.db_path}")
+        return
+
+    options = [
+        f"Rekordbox {c.version_major} (v{c.version_str}) — {c.db_path}"
+        for c in configs
+    ]
+    options.append("Eigenen Pfad zu master.db angeben (v6/v7)")
+    idx = _menu_choice("Rekordbox-Version / Datenbank auswählen", options)
+
+    if idx < len(configs):
+        chosen = configs[idx]
+        configure_db(version=chosen.version_major, db_path=chosen.db_path)
+        _rb_session_selected = True
+        click.echo(f"[Aktiviert] Rekordbox {chosen.version_major} (v{chosen.version_str})")
+    else:
+        ver_idx = _menu_choice("Welche Rekordbox Version?", ["Rekordbox 7", "Rekordbox 6"])
+        ver = 7 if ver_idx == 0 else 6
+        custom_path = click.prompt("Pfad zur master.db")
+        try:
+            configure_db(version=ver, db_path=custom_path)
+            _rb_session_selected = True
+            click.echo(f"[Aktiviert] Rekordbox {ver} ({custom_path})")
+        except Exception as exc:
+            raise click.ClickException(f"Datenbank konnte nicht geöffnet werden: {exc}")
+
+
 def _run_walkthrough_flow() -> None:
-    """Run the linear 4-step walkthrough: Genre -> Playlist -> Tracks -> Action."""
+    """Run the linear walkthrough: Rekordbox v6/v7 -> Genre -> Playlist -> Tracks -> Action."""
     click.clear()
     click.echo("=" * 65)
     click.echo("       djcues — Rekordbox Genre & Cue Walkthrough")
     click.echo("=" * 65)
+
+    # 0. Rekordbox Version (v6 / v7 / custom)
+    _select_rekordbox_version()
 
     # 1. Genre
     genre_key, profile = _menu_genre()
@@ -287,23 +358,31 @@ def _run_menu() -> None:
         click.clear()
         click.echo("djcues — Rekordbox Cue Assistant")
         click.echo("=" * 38)
-        click.echo("1) 🚀 Walkthrough starten (Genre -> Playlist -> Tracks -> Aktion)")
+        active = get_active_db_info()
+        if active:
+            click.echo(f"Aktiv: Rekordbox {active.version_major} ({active.version_str}) | {active.db_path}")
+            click.echo("-" * 38)
+        click.echo("1) 🚀 Walkthrough starten (Rekordbox -> Genre -> Playlist -> Tracks -> Aktion)")
         click.echo("2) 📋 Cue-Vorschläge anzeigen (Propose)")
         click.echo("3) 🌐 Visualisierung im Browser öffnen (Viz)")
         click.echo("4) 🎛️  Cues im Browser prüfen/anpassen (Review Studio)")
         click.echo("5) 💾 Review-Session anwenden / DB-Backup in Dokumente erstellen")
         click.echo("6) Beenden")
+        click.echo("7) ⚙️  Rekordbox-Version wählen / wechseln (v6 / v7 / eigener Pfad)")
         click.echo()
 
         try:
-            choice = click.prompt("Auswahl", type=click.Choice(["1", "2", "3", "4", "5", "6"]))
+            choice = click.prompt("Auswahl", type=click.Choice(["1", "2", "3", "4", "5", "6", "7"]))
             if choice == "6":
                 click.echo("Auf Wiedersehen.")
                 return
 
-            if choice == "1":
+            if choice == "7":
+                _select_rekordbox_version(force_prompt=True)
+            elif choice == "1":
                 _run_walkthrough_flow()
             elif choice == "5":
+                _select_rekordbox_version()
                 sub = _menu_choice(
                     "Datenbank-Aktion",
                     [
@@ -319,6 +398,7 @@ def _run_menu() -> None:
                     force = False if dry_run else click.confirm("Vorhandene Cues ohne weitere Rückfrage überschreiben?", default=False)
                     apply.callback(session_file, dry_run, force, None)
             else:
+                _select_rekordbox_version()
                 # --- SCHRITT 1: Genre auswählen ---
                 genre_key, profile = _menu_genre()
                 click.echo(f"\n[Aktiviert] Genre: {profile['name']} ({profile['bpm_range']})")
@@ -357,9 +437,16 @@ def _run_menu() -> None:
 
 
 @click.group(invoke_without_command=True)
+@click.option("--rb-version", type=click.Choice(["6", "7", "auto"]), default="auto", help="Rekordbox version to use (6, 7, or auto).")
+@click.option("--db-path", default=None, help="Optional custom path to master.db.")
 @click.pass_context
-def cli(ctx):
+def cli(ctx, rb_version="auto", db_path=None):
     """djcues — automated rekordbox cue placement based on phrase analysis."""
+    global _rb_session_selected
+    if db_path is not None or rb_version != "auto":
+        ver = int(rb_version) if rb_version in ("6", "7") else None
+        configure_db(version=ver, db_path=db_path)
+        _rb_session_selected = True
     if ctx.invoked_subcommand is None:
         _run_menu()
 

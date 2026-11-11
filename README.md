@@ -147,6 +147,13 @@ In fast-paced genres like **Industrial Techno, Hard Techno, Schranz, and Raw Gro
 
 Hier werden alle aktuellen und zukünftigen Neuerungen, Fehlerbehebungen und Optimierungen des Projekts dokumentiert.
 
+### [2026-11-11 (v6)] — Rekordbox v6 & v7 Erkennung, Versionswahl & Manueller DB-Pfad
+- **🎛️ Rekordbox 6 / 7 Auswahl im Studio:**
+  - Erkennt automatisch alle installierten **Rekordbox 6 und Rekordbox 7** Versionen (auch auf anderen Laufwerken wie `D:\`, `K:\` oder über `options.json` / `rekordbox3.settings`).
+  - Sind **beide Versionen (v6 und v7)** vorhanden, kannst du am Anfang des Walkthroughs oder jederzeit über **Menüpunkt 7** auswählen, welche Version/Datenbank genutzt werden soll.
+  - Wird kein Verzeichnis automatisch gefunden (*„No Rekordbox v6/v7 directory found“*), bricht das Tool nicht mehr ab, sondern bietet dir direkt die Möglichkeit, **v6/v7** und den Pfad zu deiner **`master.db`** (auch per Drag & Drop) anzugeben.
+- **🔧 Neue CLI-Optionen:** `--rb-version [6|7|auto]` und `--db-path <pfad>` für alle Befehle.
+
 ### [2026-11-11 (v5)] — 1-Klick Abhängigkeiten-Installer (`INSTALL_DEPENDENCIES.bat`) & Auto-Setup
 - **📦 `INSTALL_DEPENDENCIES.bat`:**
   - Neue Setup-Batch-Datei für Windows: Prüft automatisch Python 3.10+ (mit optionaler Installation via `winget`), erstellt `.venv` bei Bedarf und installiert automatisch alle Abhängigkeiten (`pyrekordbox`, `click`, `djcues`, `pytest`).
