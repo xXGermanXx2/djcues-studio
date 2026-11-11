@@ -109,10 +109,72 @@ CUE_SYSTEM: list[CueSlot] = [
     ),
 ]
 
-# Quick lookups
-KIND_TO_PAD: dict[int, str] = {s.kind: s.pad for s in CUE_SYSTEM}
-PAD_TO_KIND: dict[str, int] = {s.pad: s.kind for s in CUE_SYSTEM}
-CUE_SYSTEM_BY_PAD: dict[str, CueSlot] = {s.pad: s for s in CUE_SYSTEM}
+# Extended Hot Cue slots (Bank I–P, Kinds 10–17) for 12/16-Hot-Cue mode in Rekordbox 6/7
+EXTENDED_CUE_SLOTS: list[CueSlot] = [
+    CueSlot(
+        pad="I", kind=10,
+        hot_cue_label="16 Bars Before Main Drop", memory_cue_label="16 Bars Before Main Drop",
+        hot_cue_color_table_index=0, hot_cue_color=255,
+        memory_cue_color_table_index=None, memory_cue_color=7,
+        is_loop=False, memory_offset_bars=16,
+    ),
+    CueSlot(
+        pad="J", kind=11,
+        hot_cue_label="Second Drop / Peak 2", memory_cue_label="Second Drop / Peak 2",
+        hot_cue_color_table_index=42, hot_cue_color=-1,
+        memory_cue_color_table_index=None, memory_cue_color=5,
+        is_loop=False, memory_offset_bars=16,
+    ),
+    CueSlot(
+        pad="K", kind=12,
+        hot_cue_label="16 Beats Before Drop 2", memory_cue_label="16 Beats Before Drop 2",
+        hot_cue_color_table_index=0, hot_cue_color=255,
+        memory_cue_color_table_index=None, memory_cue_color=1,
+        is_loop=False, memory_offset_bars=16,
+    ),
+    CueSlot(
+        pad="L", kind=13,
+        hot_cue_label="Second Breakdown", memory_cue_label="Second Breakdown",
+        hot_cue_color_table_index=1, hot_cue_color=-1,
+        memory_cue_color_table_index=None, memory_cue_color=6,
+        is_loop=False, memory_offset_bars=16,
+    ),
+    CueSlot(
+        pad="M", kind=14,
+        hot_cue_label="Vocal Hook / Mid Shift", memory_cue_label="Vocal Hook / Mid Shift",
+        hot_cue_color_table_index=56, hot_cue_color=-1,
+        memory_cue_color_table_index=None, memory_cue_color=3,
+        is_loop=False, memory_offset_bars=16,
+    ),
+    CueSlot(
+        pad="N", kind=15,
+        hot_cue_label="Final Buildup", memory_cue_label="Final Buildup",
+        hot_cue_color_table_index=0, hot_cue_color=255,
+        memory_cue_color_table_index=None, memory_cue_color=1,
+        is_loop=False, memory_offset_bars=16,
+    ),
+    CueSlot(
+        pad="O", kind=16,
+        hot_cue_label="Mix-Out Trigger (16 Bars Left)", memory_cue_label="Mix-Out Trigger (16 Bars Left)",
+        hot_cue_color_table_index=1, hot_cue_color=-1,
+        memory_cue_color_table_index=None, memory_cue_color=2,
+        is_loop=False, memory_offset_bars=0,
+    ),
+    CueSlot(
+        pad="P", kind=17,
+        hot_cue_label="Safety Outro Loop", memory_cue_label="Safety Outro Loop",
+        hot_cue_color_table_index=18, hot_cue_color=-1,
+        memory_cue_color_table_index=0, memory_cue_color=4,
+        is_loop=True, memory_offset_bars=0,
+    ),
+]
+
+ALL_CUE_SLOTS: list[CueSlot] = CUE_SYSTEM + EXTENDED_CUE_SLOTS
+
+# Quick lookups (covers all 16 pads A–P; CUE_SYSTEM stays 8 slots A–H for compatibility)
+KIND_TO_PAD: dict[int, str] = {s.kind: s.pad for s in ALL_CUE_SLOTS}
+PAD_TO_KIND: dict[str, int] = {s.pad: s.kind for s in ALL_CUE_SLOTS}
+CUE_SYSTEM_BY_PAD: dict[str, CueSlot] = {s.pad: s for s in ALL_CUE_SLOTS}
 
 # ---------------------------------------------------------------------------
 # Genre Profiles — personalized cue strategies, phrasing & loop lengths

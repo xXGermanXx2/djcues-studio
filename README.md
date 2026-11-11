@@ -147,6 +147,16 @@ In fast-paced genres like **Industrial Techno, Hard Techno, Schranz, and Raw Gro
 
 Hier werden alle aktuellen und zukünftigen Neuerungen, Fehlerbehebungen und Optimierungen des Projekts dokumentiert.
 
+### [2026-11-11 (v7)] — Flexible Hot Cue Anzahl (4 / 8 / 12 / 16) & Loops An/Aus
+- **🔢 Auswahl der Hot Cue Anzahl (`--hot-cues 4|8|12|16`):**
+  - **4 Hot Cues (Kompakt, Pads A–D):** Mappt automatisch die 4 wichtigsten Meilensteine (Start, Bassline/Rumble, Main Drop, Outro) auf die ersten 4 Pads.
+  - **8 Hot Cues (Standard, Pads A–H):** Das klassische 8-Pad-System.
+  - **12 oder 16 Hot Cues (Erweitert, Pads A–P):** Volle Rekordbox-6/7-Bank mit erweiterten Markern (16 Bars vor Drop, 2. Drop, 2. Breakdown, PVDI Vocal Hook, Mix-Out-Trigger, Safety-Loop).
+- **🔁 Loops An/Aus (`--loops` / `--no-loops`):**
+  - Wähle direkt im Walkthrough oder per Flag aus, ob automatisch **Loops** gesetzt werden sollen (z. B. Bassline-Intro & Outro) oder ausschließlich normale Cue-Punkte ohne Loops.
+- **🐛 Fix für `pyrekordbox >= 0.5.0` DB-Schreibmodul (`DjmdCue`):**
+  - Importpfad in [`writer.py`](src/djcues/writer.py) für aktuelle `pyrekordbox`-Versionen (`pyrekordbox.masterdb.DjmdCue`) aktualisiert.
+
 ### [2026-11-11 (v6)] — Rekordbox v6 & v7 Erkennung, Versionswahl & Manueller DB-Pfad
 - **🎛️ Rekordbox 6 / 7 Auswahl im Studio:**
   - Erkennt automatisch alle installierten **Rekordbox 6 und Rekordbox 7** Versionen (auch auf anderen Laufwerken wie `D:\`, `K:\` oder über `options.json` / `rekordbox3.settings`).

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from djcues.constants import CUE_SYSTEM, CUE_SYSTEM_BY_PAD, get_genre_profile
+from djcues.constants import ALL_CUE_SLOTS, CUE_SYSTEM, CUE_SYSTEM_BY_PAD, get_genre_profile
 from djcues.models import BeatGrid, CuePoint, CueProposal, Phrase, Track
 
 
@@ -124,11 +124,15 @@ class CueStrategy:
         loop_length_bars: int | None = None,
         genre: str = "auto",
         tempo_adaptive: bool = True,
+        max_hot_cues: int = 8,
+        use_loops: bool = True,
     ) -> None:
         self.genre = genre
         self._user_memory_offset = memory_offset_bars
         self._user_loop_bars = loop_length_bars
         self.tempo_adaptive = tempo_adaptive
+        self.max_hot_cues = max(1, min(16, max_hot_cues))
+        self.use_loops = use_loops
 
     @property
     def memory_offset_bars(self) -> int:
@@ -180,9 +184,10 @@ class CueStrategy:
         pre_drop_d = profile.get("pre_drop_d_beats", 8)
         pre_drop_f = profile.get("pre_drop_f_beats", 32)
 
+        loop_status = f"{effective_loop_bars} Takte" if self.use_loops else "Aus (nur Cue-Punkte)"
         notes.append(
             f"Genre-Profil: {profile['name']} ({profile['bpm_range']}) "
-            f"— Loops: {effective_loop_bars} Takte, Memory-Offset: {effective_offset_bars} Takte"
+            f"— Hot Cues: {self.max_hot_cues}, Loops: {loop_status}, Memory-Offset: {effective_offset_bars} Takte"
         )
 
         positions: dict[str, float] = {}
@@ -416,31 +421,167 @@ class CueStrategy:
             confidence["H"] = 0.45
             notes.append(f"H ({labels['H']}): grid-based 32-bar mix-out at beat {outro_beat}")
 
-        # --- Build CuePoint objects ---
-        for slot in CUE_SYSTEM:
-            pad = slot.pad
-            if pad not in positions:
-                continue
+        # --- Extended Pads (I–P) when max_hot_cues > 8 ---
+        if self.max_hot_cues > 8:
+            total_beats = max(65, bg.ms_to_beat(track.duration_ms))
 
-            pos_ms = positions[pad]
-            loop_end = None
-            if slot.is_loop:
-                loop_end = pos_ms + bg.bars_to_ms(effective_loop_bars)
+            # I: 16 Bars Before Main Drop
+            if "G" in positions:
+                positions["I"] = max(bg.beat_to_ms(1), positions["G"] - bg.bars_to_ms(16))
+                confidence["I"] = confidence.get("G", 0.8)
+                notes.append("I (16 Bars Before Main Drop): long mix-in waypoint")
 
-            hot_label = labels.get(pad, slot.hot_cue_label)
-            mem_label = labels.get(pad, slot.memory_cue_label)
+            # J: Second Drop / Peak 2
+            min_j_ms = positions.get("E", positions.get("G", bg.beat_to_ms(1)) + bg.bars_to_ms(16))
+            second_choruses = [p for p in choruses if p.position_ms > min_j_ms and ("H" not in positions or p.position_ms < positions["H"])]
+            if second_choruses:
+                j_phrase = second_choruses[0]
+                positions["J"] = j_phrase.position_ms
+                confidence["J"] = 0.80
+                notes.append(f"J (Second Drop / Peak 2): Chorus at beat {j_phrase.beat_start}")
+            else:
+                late_up = [p for p in phrases if p.position_ms > min_j_ms and p.label in ("Up", "Verse4", "Verse5", "Verse6")]
+                if late_up:
+                    positions["J"] = late_up[0].position_ms
+                    confidence["J"] = 0.65
+                else:
+                    j_beat = ((int(total_beats * 0.70) - 1) // 16) * 16 + 1
+                    positions["J"] = bg.beat_to_ms(max(65, j_beat))
+                    confidence["J"] = 0.45
+
+            # K: 16 Beats Before Drop 2
+            if "J" in positions:
+                positions["K"] = max(bg.beat_to_ms(1), positions["J"] - bg.ms_per_beat * 16)
+                confidence["K"] = confidence.get("J", 0.7)
+
+            # L: Second Breakdown
+            extra_breaks = [
+                p for p in phrases
+                if p.label in ("Down", "Bridge")
+                and p.position_ms != positions.get("C")
+                and p.position_ms != positions.get("E")
+            ]
+            if extra_breaks:
+                positions["L"] = extra_breaks[-1].position_ms
+                confidence["L"] = 0.75
+            else:
+                l_beat = ((int(total_beats * 0.48) - 1) // 16) * 16 + 1
+                positions["L"] = bg.beat_to_ms(max(33, l_beat))
+                confidence["L"] = 0.40
+
+            # M: Vocal Hook (PVDI) or Mid Shift
+            vocal_ms = None
+            if track.vocal_track:
+                for idx, val in enumerate(track.vocal_track):
+                    if val >= 2:
+                        raw_ms = idx * (1024 / 22050) * 1000
+                        v_beat = bg.ms_to_beat(raw_ms)
+                        vocal_ms = bg.beat_to_ms(v_beat)
+                        break
+            if vocal_ms is not None:
+                positions["M"] = vocal_ms
+                confidence["M"] = 0.80
+                notes.append(f"M (Vocal Hook): PVDI vocal onset at beat {bg.ms_to_beat(vocal_ms)}")
+            else:
+                m_beat = ((int(total_beats * 0.55) - 1) // 16) * 16 + 1
+                positions["M"] = bg.beat_to_ms(max(33, m_beat))
+                confidence["M"] = 0.40
+
+            # N: Final Buildup (32 beats before H)
+            if "H" in positions:
+                positions["N"] = max(bg.beat_to_ms(1), positions["H"] - bg.ms_per_beat * 32)
+                confidence["N"] = 0.80
+
+            # O: Mix-Out Trigger (16 bars before end)
+            o_beat = max(1, total_beats - 64)
+            o_beat = ((o_beat - 1) // 8) * 8 + 1
+            positions["O"] = bg.beat_to_ms(o_beat)
+            confidence["O"] = 0.75
+
+            # P: Safety Outro Loop (8 bars before end)
+            p_beat = max(1, total_beats - 32)
+            p_beat = ((p_beat - 1) // 8) * 8 + 1
+            positions["P"] = bg.beat_to_ms(p_beat)
+            confidence["P"] = 0.75
+
+        # --- Build CuePoint objects according to max_hot_cues & use_loops ---
+        if self.max_hot_cues <= 4:
+            # Compact 4-Hot-Cue mode: map Start (A), Bassline (B), Main Drop (G->C), Outro (H->D)
+            compact_map = [
+                ("A", "A", CUE_SYSTEM_BY_PAD["A"], False),
+                ("B", "B", CUE_SYSTEM_BY_PAD["B"], True),
+                ("C", "G" if "G" in positions else "C", CUE_SYSTEM_BY_PAD["G" if "G" in positions else "C"], False),
+                ("D", "H" if "H" in positions else "E", CUE_SYSTEM_BY_PAD["H" if "H" in positions else "E"], True),
+            ]
+            target_slots = []
+            for pad_out, src_key, style_slot, loop_flag in compact_map[: self.max_hot_cues]:
+                if src_key not in positions:
+                    continue
+                target_slot = CUE_SYSTEM_BY_PAD[pad_out]
+                pos_ms = positions[src_key]
+                hot_label = labels.get(src_key, style_slot.hot_cue_label)
+                mem_label = labels.get(src_key, style_slot.memory_cue_label)
+                target_slots.append((
+                    target_slot.kind,
+                    pos_ms,
+                    style_slot.hot_cue_color_table_index,
+                    style_slot.hot_cue_color,
+                    style_slot.memory_cue_color_table_index,
+                    style_slot.memory_cue_color,
+                    hot_label,
+                    mem_label,
+                    loop_flag,
+                    style_slot.memory_offset_bars,
+                ))
+        else:
+            active_slots = ALL_CUE_SLOTS[: self.max_hot_cues]
+            target_slots = []
+            for slot in active_slots:
+                pad = slot.pad
+                if pad not in positions:
+                    continue
+                pos_ms = positions[pad]
+                hot_label = labels.get(pad, slot.hot_cue_label)
+                mem_label = labels.get(pad, slot.memory_cue_label)
+                target_slots.append((
+                    slot.kind,
+                    pos_ms,
+                    slot.hot_cue_color_table_index,
+                    slot.hot_cue_color,
+                    slot.memory_cue_color_table_index,
+                    slot.memory_cue_color,
+                    hot_label,
+                    mem_label,
+                    slot.is_loop,
+                    slot.memory_offset_bars,
+                ))
+
+        for (
+            kind_val,
+            pos_ms,
+            hc_color_idx,
+            hc_color,
+            mc_color_idx,
+            mc_color,
+            hot_label,
+            mem_label,
+            slot_is_loop,
+            slot_mem_offset,
+        ) in target_slots:
+            is_loop_active = slot_is_loop and self.use_loops
+            loop_end = (pos_ms + bg.bars_to_ms(effective_loop_bars)) if is_loop_active else None
 
             hot_cues.append(CuePoint(
-                kind=slot.kind,
+                kind=kind_val,
                 position_ms=pos_ms,
                 loop_end_ms=loop_end,
-                color_table_index=slot.hot_cue_color_table_index,
-                color=slot.hot_cue_color,
+                color_table_index=hc_color_idx,
+                color=hc_color,
                 comment=hot_label,
             ))
 
             # Memory cue
-            if slot.memory_offset_bars == 0:
+            if slot_mem_offset == 0:
                 mem_pos = pos_ms
             else:
                 mem_pos = pos_ms - bg.bars_to_ms(effective_offset_bars)
@@ -448,21 +589,18 @@ class CueStrategy:
                 if mem_pos < first_beat_ms:
                     mem_pos = first_beat_ms
                 else:
-                    # Snap to nearest downbeat (bar start)
                     mem_beat = bg.ms_to_beat(mem_pos)
                     bar_beat = ((mem_beat - 1) // 4) * 4 + 1
                     mem_pos = bg.beat_to_ms(bar_beat)
 
-            mem_loop_end = None
-            if slot.is_loop:
-                mem_loop_end = mem_pos + bg.bars_to_ms(effective_loop_bars)
+            mem_loop_end = (mem_pos + bg.bars_to_ms(effective_loop_bars)) if is_loop_active else None
 
             memory_cues.append(CuePoint(
                 kind=0,
                 position_ms=mem_pos,
                 loop_end_ms=mem_loop_end,
-                color_table_index=slot.memory_cue_color_table_index,
-                color=slot.memory_cue_color,
+                color_table_index=mc_color_idx,
+                color=mc_color,
                 comment=mem_label,
             ))
 

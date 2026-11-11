@@ -233,3 +233,22 @@ def test_apply_session_asks_for_backup(tmp_path, monkeypatch):
     apply_session(session_file, dry_run=False, force=True, backup=None)
     # Still only 1 backup folder (no new backup created)
     assert len(list(backup_root.iterdir())) == 1
+
+
+def test_build_cue_rows_respects_no_loops_and_16_pads():
+    from djcues.writer import build_cue_rows
+
+    hot_cues = {
+        "B": {"status": "accepted", "position_ms": 2000.0, "loop_end_ms": None},
+        "P": {"status": "accepted", "position_ms": 16000.0, "loop_end_ms": None},
+    }
+    memory_cues = {
+        "2": {"status": "accepted", "position_ms": 2000.0, "loop_end_ms": None},
+        "16": {"status": "accepted", "position_ms": 16000.0, "loop_end_ms": None},
+    }
+    hot_rows, mem_rows = build_cue_rows(hot_cues, memory_cues)
+    assert len(hot_rows) == 2
+    assert len(mem_rows) == 2
+    for row in hot_rows + mem_rows:
+        assert row["OutMsec"] == -1
+        assert row["ActiveLoop"] == -1

@@ -9,7 +9,7 @@ import sys
 from datetime import datetime
 from uuid import uuid4
 
-from djcues.constants import CUE_SYSTEM, CUE_SYSTEM_BY_PAD
+from djcues.constants import ALL_CUE_SLOTS, CUE_SYSTEM, CUE_SYSTEM_BY_PAD
 
 
 def get_documents_dir() -> pathlib.Path:
@@ -92,9 +92,9 @@ def build_cue_rows(
         if entry.get("status") == "skipped":
             continue
 
-        is_loop = slot.is_loop
+        is_loop = entry.get("loop_end_ms") is not None
         in_msec = int(entry["position_ms"])
-        if is_loop and entry.get("loop_end_ms") is not None:
+        if is_loop:
             out_msec = int(entry["loop_end_ms"])
         else:
             out_msec = -1
@@ -112,7 +112,7 @@ def build_cue_rows(
             "Color": slot.hot_cue_color,
             "ColorTableIndex": slot.hot_cue_color_table_index,
             "ActiveLoop": 0 if is_loop else -1,
-            "Comment": slot.hot_cue_label,
+            "Comment": entry.get("comment") or slot.hot_cue_label,
             "BeatLoopSize": 0,
             "CueMicrosec": 0,
         })
@@ -123,11 +123,11 @@ def build_cue_rows(
             continue
 
         slot_idx = int(slot_num_str) - 1
-        slot = CUE_SYSTEM[slot_idx]
+        slot = ALL_CUE_SLOTS[slot_idx]
 
-        is_loop = slot.is_loop
+        is_loop = entry.get("loop_end_ms") is not None
         in_msec = int(entry["position_ms"])
-        if is_loop and entry.get("loop_end_ms") is not None:
+        if is_loop:
             out_msec = int(entry["loop_end_ms"])
         else:
             out_msec = -1
@@ -145,7 +145,7 @@ def build_cue_rows(
             "Color": slot.memory_cue_color,
             "ColorTableIndex": slot.memory_cue_color_table_index,
             "ActiveLoop": 0 if is_loop else -1,
-            "Comment": slot.memory_cue_label,
+            "Comment": entry.get("comment") or slot.memory_cue_label,
             "BeatLoopSize": 0,
             "CueMicrosec": 0,
         })
@@ -159,7 +159,10 @@ def write_cues_for_track(db, content, hot_rows, mem_rows, overwrite=False) -> in
     If overwrite is True, deletes existing cues first.
     Returns the count of cues written.
     """
-    from pyrekordbox.db6 import tables
+    try:
+        from pyrekordbox.masterdb import DjmdCue
+    except ImportError:
+        from pyrekordbox.db6.tables import DjmdCue
 
     if overwrite:
         existing = db.get_cue(ContentID=content.ID)
@@ -168,9 +171,9 @@ def write_cues_for_track(db, content, hot_rows, mem_rows, overwrite=False) -> in
 
     count = 0
     for row in hot_rows + mem_rows:
-        cue_id = db.generate_unused_id(tables.DjmdCue)
+        cue_id = db.generate_unused_id(DjmdCue)
         cue_uuid = str(uuid4())
-        cue = tables.DjmdCue.create(
+        cue = DjmdCue.create(
             ID=str(cue_id),
             ContentID=str(content.ID),
             ContentUUID=content.UUID,

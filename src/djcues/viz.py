@@ -28,6 +28,14 @@ CUE_COLORS: dict[str, str] = {
     "F": "#9b59b6",
     "G": "#00bcd4",
     "H": "#e67e22",
+    "I": "#f39c12",
+    "J": "#e74c3c",
+    "K": "#ff9800",
+    "L": "#3498db",
+    "M": "#9b59b6",
+    "N": "#1abc9c",
+    "O": "#00bcd4",
+    "P": "#2ecc71",
 }
 
 
@@ -139,7 +147,8 @@ def _render_cue_markers(
 def _render_confidence_bars(confidence: dict[str, float]) -> str:
     """Render per-slot confidence bars."""
     bars = []
-    for pad in "ABCDEFGH":
+    pads = list("ABCDEFGH") + [p for p in "IJKLMNOP" if p in confidence]
+    for pad in pads:
         conf = confidence.get(pad, 0.0)
         slot = CUE_SYSTEM_BY_PAD.get(pad)
         label = html.escape(slot.hot_cue_label) if slot else pad

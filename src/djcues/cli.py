@@ -308,8 +308,46 @@ def _select_rekordbox_version(force_prompt: bool = False) -> None:
             raise click.ClickException(f"Datenbank konnte nicht geöffnet werden: {exc}")
 
 
+def _menu_cue_options(profile: dict, ask_tuning: bool = True) -> tuple[int, bool, int, int]:
+    """Ask user for Hot Cue count (4, 8, 12, 16) and whether to include Loops."""
+    click.echo("\n--- HOT CUE & LOOP EINSTELLUNGEN ---")
+    cue_choices = [
+        "8 Hot Cues  (Standard: Pads A–H)",
+        "4 Hot Cues  (Kompakt: Start, Bassline, Main Drop, Outro)",
+        "12 Hot Cues (Erweitert: Pads A–L inkl. 2. Drop & 2. Breakdown)",
+        "16 Hot Cues (Maximum: Pads A–P für Rekordbox 6/7 Bank I–P)",
+    ]
+    c_idx = _menu_choice("Wie viele Hot Cues sollen gesetzt werden?", cue_choices)
+    max_hot_cues = [8, 4, 12, 16][c_idx]
+
+    loop_idx = _menu_choice(
+        "Sollen Loops erstellt werden?",
+        [
+            "Ja — mit Loops (z. B. für Bassline-Intro & Outro)",
+            "Nein — keine Loops (nur normale Cue-Punkte)",
+        ],
+    )
+    use_loops = loop_idx == 0
+
+    def_loop = profile.get("default_loop_bars", 8)
+    def_offset = profile.get("default_memory_offset_bars", 16)
+
+    if ask_tuning:
+        offset = click.prompt(f"Memory-Cue-Abstand in Takten ({profile['name']} Standard)", default=def_offset, type=int)
+        loop_bars = (
+            click.prompt(f"Loop-Länge in Takten ({profile['name']} Standard)", default=def_loop, type=int)
+            if use_loops
+            else def_loop
+        )
+    else:
+        offset = def_offset
+        loop_bars = def_loop
+
+    return max_hot_cues, use_loops, offset, loop_bars
+
+
 def _run_walkthrough_flow() -> None:
-    """Run the linear walkthrough: Rekordbox v6/v7 -> Genre -> Playlist -> Tracks -> Action."""
+    """Run the linear walkthrough: Rekordbox v6/v7 -> Genre -> Cues/Loops -> Playlist -> Tracks -> Action."""
     click.clear()
     click.echo("=" * 65)
     click.echo("       djcues — Rekordbox Genre & Cue Walkthrough")
@@ -321,14 +359,18 @@ def _run_walkthrough_flow() -> None:
     # 1. Genre
     genre_key, profile = _menu_genre()
     click.echo(f"\n[Aktiviert] Genre: {profile['name']} ({profile['bpm_range']})")
-    click.echo(f"  • Standard-Loops: {profile['default_loop_bars']} Takte | Memory-Warnung: {profile['default_memory_offset_bars']} Takte")
 
-    # 2. Playlist & Tracks
-    click.echo("\n--- SCHRITT 2: PLAYLIST & TRACKS AUSWÄHLEN ---")
+    # 2. Hot Cue Count & Loops
+    max_hot_cues, use_loops, offset, loop_bars = _menu_cue_options(profile, ask_tuning=False)
+    loop_txt = f"{loop_bars} Takte" if use_loops else "Aus"
+    click.echo(f"  • Hot Cues: {max_hot_cues} | Loops: {loop_txt} | Memory-Offset: {offset} Takte")
+
+    # 3. Playlist & Tracks
+    click.echo("\n--- SCHRITT 3: PLAYLIST & TRACKS AUSWÄHLEN ---")
     playlist, track_name, all_tracks = _menu_scope()
 
-    # 3. Aktion
-    click.echo("\n--- SCHRITT 3: AKTION AUSWÄHLEN ---")
+    # 4. Aktion
+    click.echo("\n--- SCHRITT 4: AKTION AUSWÄHLEN ---")
     actions = [
         "🌐  Im Webbrowser visualisieren (Waveform, Phrasen & Cue-Pads ansehen)",
         "📋  Cue-Vorschläge im Terminal anzeigen (Propose / Details)",
@@ -337,19 +379,14 @@ def _run_walkthrough_flow() -> None:
     ]
     action_idx = _menu_choice("Aktion auswählen", actions)
 
-    def_loop = profile.get("default_loop_bars", 8)
-    def_offset = profile.get("default_memory_offset_bars", 16)
-    offset = def_offset
-    loop_bars = def_loop
-
     if action_idx == 0:
-        viz.callback(playlist, track_name, all_tracks, False, offset, loop_bars, None, genre_key)
+        viz.callback(playlist, track_name, all_tracks, False, offset, loop_bars, None, genre_key, max_hot_cues, use_loops)
     elif action_idx == 1:
-        propose.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key)
+        propose.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops)
     elif action_idx == 2:
-        review.callback(playlist, track_name, all_tracks, offset, loop_bars, None, genre_key)
+        review.callback(playlist, track_name, all_tracks, offset, loop_bars, None, genre_key, max_hot_cues, use_loops)
     elif action_idx == 3:
-        compare.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key)
+        compare.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops)
 
 
 def _run_menu() -> None:
@@ -403,25 +440,22 @@ def _run_menu() -> None:
                 genre_key, profile = _menu_genre()
                 click.echo(f"\n[Aktiviert] Genre: {profile['name']} ({profile['bpm_range']})")
 
-                # --- SCHRITT 2: Playlist & Tracks ---
-                click.echo("\n--- SCHRITT 2: PLAYLIST & TRACKS AUSWÄHLEN ---")
+                # --- SCHRITT 2: Hot Cues & Loops ---
+                max_hot_cues, use_loops, offset, loop_bars = _menu_cue_options(profile, ask_tuning=True)
+
+                # --- SCHRITT 3: Playlist & Tracks ---
+                click.echo("\n--- PLAYLIST & TRACKS AUSWÄHLEN ---")
                 playlist, track_name, all_tracks = _menu_scope()
 
-                # --- SCHRITT 3: Parameter mit Genre-Defaults ---
-                def_loop = profile.get("default_loop_bars", 8)
-                def_offset = profile.get("default_memory_offset_bars", 16)
-                offset = click.prompt(f"Memory-Cue-Abstand in Takten ({profile['name']} Standard)", default=def_offset, type=int)
-                loop_bars = click.prompt(f"Loop-Länge in Takten ({profile['name']} Standard)", default=def_loop, type=int)
-
                 if choice == "2":
-                    propose.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key)
+                    propose.callback(playlist, track_name, all_tracks, offset, loop_bars, genre_key, max_hot_cues, use_loops)
                 elif choice == "3":
                     compare_mode = click.confirm("Bestehende und vorgeschlagene Cues vergleichen?", default=False)
                     output = click.prompt("Ausgabedatei (leer = automatisch)", default="", show_default=False) or None
-                    viz.callback(playlist, track_name, all_tracks, compare_mode, offset, loop_bars, output, genre_key)
+                    viz.callback(playlist, track_name, all_tracks, compare_mode, offset, loop_bars, output, genre_key, max_hot_cues, use_loops)
                 elif choice == "4":
                     output = click.prompt("Ausgabeordner (leer = aktueller Ordner)", default="", show_default=False) or None
-                    review.callback(playlist, track_name, all_tracks, offset, loop_bars, output, genre_key)
+                    review.callback(playlist, track_name, all_tracks, offset, loop_bars, output, genre_key, max_hot_cues, use_loops)
 
             click.echo()
             click.pause("Enter drücken, um zum Menü zurückzukehren")
@@ -463,8 +497,10 @@ def menu():
 @click.option("--all", "all_tracks", is_flag=True, help="Process all tracks in the playlist.")
 @click.option("--offset", default=16, show_default=True, help="Memory cue offset in bars.")
 @click.option("--loop-bars", default=4, show_default=True, help="Loop length in bars.")
-@click.option("--genre", "-g", default="auto", show_default=True, help="Genre profile (industrial, hard_techno, hypnotic_groove, hard_groove, bounce, trance, general)")
-def propose(playlist_name, track_name, all_tracks, offset, loop_bars, genre="auto"):
+@click.option("--genre", "-g", default="auto", show_default=True, help="Genre profile (industrial, hard_techno, schranz, hypnotic_groove, hard_groove, bounce, trance, general)")
+@click.option("--hot-cues", "-c", default=8, show_default=True, type=int, help="Number of hot cues (4, 8, 12, or 16).")
+@click.option("--loops/--no-loops", default=True, show_default=True, help="Enable or disable loop cues.")
+def propose(playlist_name, track_name, all_tracks, offset, loop_bars, genre="auto", hot_cues=8, loops=True):
     """Propose cue placements for tracks in a playlist."""
     playlist = find_playlist(playlist_name)
     if playlist is None:
@@ -472,7 +508,13 @@ def propose(playlist_name, track_name, all_tracks, offset, loop_bars, genre="aut
         raise SystemExit(1)
 
     tracks = _get_tracks_for_scope(playlist, track_name, all_tracks)
-    strategy = CueStrategy(genre=genre, memory_offset_bars=offset, loop_length_bars=loop_bars)
+    strategy = CueStrategy(
+        genre=genre,
+        memory_offset_bars=offset,
+        loop_length_bars=loop_bars,
+        max_hot_cues=hot_cues,
+        use_loops=loops,
+    )
 
     for t in tracks:
         proposal = strategy.propose(t)
@@ -485,8 +527,10 @@ def propose(playlist_name, track_name, all_tracks, offset, loop_bars, genre="aut
 @click.option("--all", "all_tracks", is_flag=True, help="Compare all tracks in the playlist.")
 @click.option("--offset", default=16, show_default=True, help="Memory cue offset in bars.")
 @click.option("--loop-bars", default=4, show_default=True, help="Loop length in bars.")
-@click.option("--genre", "-g", default="auto", show_default=True, help="Genre profile (industrial, hard_techno, hypnotic_groove, hard_groove, bounce, trance, general)")
-def compare(playlist_name, track_name, all_tracks, offset, loop_bars, genre="auto"):
+@click.option("--genre", "-g", default="auto", show_default=True, help="Genre profile (industrial, hard_techno, schranz, hypnotic_groove, hard_groove, bounce, trance, general)")
+@click.option("--hot-cues", "-c", default=8, show_default=True, type=int, help="Number of hot cues (4, 8, 12, or 16).")
+@click.option("--loops/--no-loops", default=True, show_default=True, help="Enable or disable loop cues.")
+def compare(playlist_name, track_name, all_tracks, offset, loop_bars, genre="auto", hot_cues=8, loops=True):
     """Compare existing cues with proposed placements."""
     playlist = find_playlist(playlist_name)
     if playlist is None:
@@ -494,7 +538,13 @@ def compare(playlist_name, track_name, all_tracks, offset, loop_bars, genre="aut
         raise SystemExit(1)
 
     tracks = _get_tracks_for_scope(playlist, track_name, all_tracks)
-    strategy = CueStrategy(genre=genre, memory_offset_bars=offset, loop_length_bars=loop_bars)
+    strategy = CueStrategy(
+        genre=genre,
+        memory_offset_bars=offset,
+        loop_length_bars=loop_bars,
+        max_hot_cues=hot_cues,
+        use_loops=loops,
+    )
 
     total_matches = 0
     total_cues = 0
@@ -519,8 +569,10 @@ def compare(playlist_name, track_name, all_tracks, offset, loop_bars, genre="aut
 @click.option("--offset", default=16, help="Memory cue offset in bars (default: 16)")
 @click.option("--loop-bars", default=4, help="Loop length in bars (default: 4)")
 @click.option("--output", "-o", default=None, help="Output file path (default: auto-generated)")
-@click.option("--genre", "-g", default="auto", show_default=True, help="Genre profile (industrial, hard_techno, hypnotic_groove, hard_groove, bounce, trance, general)")
-def viz(playlist, track_name, all_tracks, compare_mode, offset, loop_bars, output, genre="auto"):
+@click.option("--genre", "-g", default="auto", show_default=True, help="Genre profile (industrial, hard_techno, schranz, hypnotic_groove, hard_groove, bounce, trance, general)")
+@click.option("--hot-cues", "-c", default=8, show_default=True, type=int, help="Number of hot cues (4, 8, 12, or 16).")
+@click.option("--loops/--no-loops", default=True, show_default=True, help="Enable or disable loop cues.")
+def viz(playlist, track_name, all_tracks, compare_mode, offset, loop_bars, output, genre="auto", hot_cues=8, loops=True):
     """Generate an HTML timeline visualization."""
     import pathlib
     import webbrowser
@@ -532,7 +584,13 @@ def viz(playlist, track_name, all_tracks, compare_mode, offset, loop_bars, outpu
         raise SystemExit(1)
 
     tracks = _get_tracks_for_scope(pl, track_name, all_tracks)
-    strategy = CueStrategy(genre=genre, memory_offset_bars=offset, loop_length_bars=loop_bars)
+    strategy = CueStrategy(
+        genre=genre,
+        memory_offset_bars=offset,
+        loop_length_bars=loop_bars,
+        max_hot_cues=hot_cues,
+        use_loops=loops,
+    )
 
     if all_tracks:
         pairs = [(t, strategy.propose(t)) for t in tracks]
@@ -565,8 +623,10 @@ def viz(playlist, track_name, all_tracks, compare_mode, offset, loop_bars, outpu
 @click.option("--offset", default=16, help="Memory cue offset in bars (default: 16)")
 @click.option("--loop-bars", default=4, help="Loop length in bars (default: 4)")
 @click.option("--output", "-o", default=None, help="Output directory (default: current dir)")
-@click.option("--genre", "-g", default="auto", show_default=True, help="Genre profile (industrial, hard_techno, hypnotic_groove, hard_groove, bounce, trance, general)")
-def review(playlist, track_name, all_tracks, offset, loop_bars, output, genre="auto"):
+@click.option("--genre", "-g", default="auto", show_default=True, help="Genre profile (industrial, hard_techno, schranz, hypnotic_groove, hard_groove, bounce, trance, general)")
+@click.option("--hot-cues", "-c", default=8, show_default=True, type=int, help="Number of hot cues (4, 8, 12, or 16).")
+@click.option("--loops/--no-loops", default=True, show_default=True, help="Enable or disable loop cues.")
+def review(playlist, track_name, all_tracks, offset, loop_bars, output, genre="auto", hot_cues=8, loops=True):
     """Launch interactive review session in browser."""
     import pathlib
     import time
@@ -580,7 +640,13 @@ def review(playlist, track_name, all_tracks, offset, loop_bars, output, genre="a
         raise SystemExit(1)
 
     selected = _get_tracks_for_scope(pl, track_name, all_tracks)
-    strategy = CueStrategy(genre=genre, memory_offset_bars=offset, loop_length_bars=loop_bars)
+    strategy = CueStrategy(
+        genre=genre,
+        memory_offset_bars=offset,
+        loop_length_bars=loop_bars,
+        max_hot_cues=hot_cues,
+        use_loops=loops,
+    )
     pairs = [(t, strategy.propose(t)) for t in selected]
 
     if not pairs:

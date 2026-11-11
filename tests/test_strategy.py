@@ -457,3 +457,35 @@ def test_schranz_emotional_breakdown_detection():
     assert hot_e.position_ms == bg.beat_to_ms(257)
     hot_b = next(c for c in prop.hot_cues if c.kind == 2)
     assert hot_b.loop_end_ms == hot_b.position_ms + bg.bars_to_ms(8)
+
+
+def test_4_hot_cues_mode(world_gone_wild: Track):
+    """4 Hot Cues mode places Start (A), Bass (B), Main Drop (C), Outro (D)."""
+    strat = CueStrategy(max_hot_cues=4)
+    prop = strat.propose(world_gone_wild)
+    assert len(prop.hot_cues) == 4
+    assert len(prop.memory_cues) == 4
+    assert [c.kind for c in prop.hot_cues] == [1, 2, 3, 5]
+    # Pad C (kind 3) should hold Main Drop position
+    hot_c = next(c for c in prop.hot_cues if c.kind == 3)
+    assert hot_c.comment == "Main Drop"
+    assert hot_c.position_ms == world_gone_wild.beat_grid.beat_to_ms(145)
+
+
+def test_16_hot_cues_mode(world_gone_wild: Track):
+    """16 Hot Cues mode generates extended pads I–P (kinds 10–17)."""
+    strat = CueStrategy(max_hot_cues=16)
+    prop = strat.propose(world_gone_wild)
+    assert len(prop.hot_cues) == 16
+    assert len(prop.memory_cues) == 16
+    kinds = [c.kind for c in prop.hot_cues]
+    assert 10 in kinds  # I
+    assert 17 in kinds  # P
+
+
+def test_no_loops_mode(world_gone_wild: Track):
+    """Disabling loops clears loop_end_ms across all hot cues and memory cues."""
+    strat = CueStrategy(use_loops=False)
+    prop = strat.propose(world_gone_wild)
+    assert all(not c.is_loop and c.loop_end_ms is None for c in prop.hot_cues)
+    assert all(not c.is_loop and c.loop_end_ms is None for c in prop.memory_cues)
