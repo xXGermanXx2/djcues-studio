@@ -11,6 +11,19 @@ from djcues.models import CueProposal, Track
 from djcues.viz import _PAGE_CSS, _render_track_body
 
 
+def format_apply_command(session_path: str) -> str:
+    """Return a ready-to-run apply command compatible with the active environment."""
+    import pathlib
+    import shutil
+    import sys
+
+    if shutil.which("uv"):
+        return f'uv run djcues apply "{session_path}"'
+    if sys.platform == "win32" and pathlib.Path(".venv/Scripts/python.exe").exists():
+        return f'.\\.venv\\Scripts\\python.exe -m djcues.cli apply "{session_path}"'
+    return f'"{sys.executable}" -m djcues.cli apply "{session_path}"'
+
+
 def create_session(
     playlist_name: str,
     playlist_id: int,
@@ -171,7 +184,7 @@ def render_review_html(
     <div class="sticky-header-right">
       <button class="btn btn-accept-all" onclick="acceptAll()">Accept All</button>
       <div class="apply-command" title="Click to copy">
-        <code id="apply-command-text">uv run djcues apply {escaped_session_path}</code>
+        <code id="apply-command-text">{html.escape(format_apply_command(session_path))}</code>
         <button class="btn btn-copy" onclick="copyApplyCommand()">Copy</button>
       </div>
     </div>

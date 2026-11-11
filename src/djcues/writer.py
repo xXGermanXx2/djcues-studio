@@ -198,7 +198,7 @@ def apply_session(session_path, dry_run=False, force=False, backup: bool | None 
     from djcues.db import get_db
 
     session_path = pathlib.Path(session_path)
-    with open(session_path) as f:
+    with open(session_path, encoding="utf-8") as f:
         session = json.load(f)
 
     tracks = session.get("tracks", {})

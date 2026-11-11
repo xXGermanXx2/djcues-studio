@@ -707,7 +707,7 @@ def review(playlist, track_name, all_tracks, offset, loop_bars, output, genre="a
     import pathlib
     import time
     import webbrowser
-    from djcues.review import create_session, render_review_html
+    from djcues.review import create_session, format_apply_command, render_review_html
     from djcues.server import start_server
 
     pl = find_playlist(playlist)
@@ -779,7 +779,8 @@ def review(playlist, track_name, all_tracks, offset, loop_bars, output, genre="a
     # Print info
     click.echo(f"Session: {session_path}")
     click.echo(f"Server:  {server_url}")
-    click.echo(f"Apply:   uv run djcues apply {session_path}")
+    click.echo(f"Apply:   {format_apply_command(str(session_path))}")
+    click.echo("Tipp:    Im Browser prüfen -> danach hier Strg+C drücken & im Menü Option 5 wählen!")
 
     # Block until interrupted
     try:
